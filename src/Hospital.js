@@ -1436,7 +1436,7 @@ function getAddSpecialityHTML() {
 </head>
 <body>
     <div class="form-container">
-        <a href="/" class="back-btn">
+        <a href="/admin-dashboard" class="back-btn">
             <i class="fas fa-arrow-left"></i> Back to Dashboard
         </a>
         
@@ -1732,7 +1732,7 @@ function getAddSpecialityHTML() {
                 
                 if (saveResponse.ok) {
                     alert('Department created successfully!');
-                    window.location.href = '/';
+                    window.location.href = '/admin-dashboard'
                 } else {
                     alert('Failed to create department');
                 }
@@ -2123,7 +2123,7 @@ function getAddDoctorHTML() {
 </head>
 <body>
     <div class="form-container">
-        <a href="/" class="back-btn">
+        <a href="/admin-dashboard" class="back-btn">
             <i class="fas fa-arrow-left"></i> Back to Dashboard
         </a>
         
@@ -2476,7 +2476,7 @@ function getAddDoctorHTML() {
                     });
                     
                     setTimeout(() => {
-                        window.location.href = '/';
+                        window.location.href = '/admin-dashboard';
                     }, 2000);
                 } else {
                     alert('Failed to register doctor. Please try again.');
@@ -2676,7 +2676,7 @@ function getAddMedicineHTML() {
 </head>
 <body>
     <div class="form-container">
-        <a href="/" class="back-btn">
+        <a href="/admin-dashboard" class="back-btn">
             <i class="fas fa-arrow-left"></i> Back to Dashboard
         </a>
         
@@ -2737,7 +2737,7 @@ function getAddMedicineHTML() {
                 
                 if (response.ok) {
                     alert('Medicine added successfully!');
-                    window.location.href = '/';
+                    window.location.href = '/admin-dashboard'
                 }
             } catch (error) {
                 console.error('Error:', error);
@@ -2934,7 +2934,7 @@ function getAddLabHTML() {
 </head>
 <body>
     <div class="form-container">
-        <a href="/" class="back-btn">
+        <a href="/admin-dashboard" class="back-btn">
             <i class="fas fa-arrow-left"></i> Back to Dashboard
         </a>
         
@@ -3156,7 +3156,7 @@ function getAddLabHTML() {
                 
                 if (response.ok) {
                     alert('Laboratory added successfully!');
-                    window.location.href = '/';
+                    window.location.href = '/admin-dashboard';
                 } else {
                     alert('Failed to add laboratory');
                 }
@@ -3173,7 +3173,7 @@ function getAddLabHTML() {
 </html>`;
 }
 
-app.get('/api/hospital/data', async (req, res) => {
+/*app.get('/api/hospital/data', async (req, res) => {
   try {
     // For now, get the first hospital (you'll need to pass hospital_id)
     const hospitalResult = await query('SELECT * FROM hospitals LIMIT 1');
@@ -3259,24 +3259,71 @@ app.post('/api/hospital/add/lab', async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
-});
+});*/
 
-module.exports = async function renderHospitalDashboard(data = null) {
-  try {
-    // Get hospital data from database
-    const hospitalResult = await query('SELECT * FROM hospitals LIMIT 1');
-    const doctorsResult = await query('SELECT * FROM doctors WHERE hospital_id = $1', [hospitalResult.rows[0]?.hospital_id]);
-    const medicinesResult = await query('SELECT * FROM medicines WHERE hospital_id = $1', [hospitalResult.rows[0]?.hospital_id]);
-    const labsResult = await query('SELECT * FROM lab_technicians WHERE hospital_id = $1', [hospitalResult.rows[0]?.hospital_id]);
-    
-    return getMainDashboardHTML(
-      hospitalResult.rows[0] || null,
-      doctorsResult.rows || [],
-      medicinesResult.rows || [],
-      labsResult.rows || []
-    );
-  } catch (error) {
-    console.error('Error loading hospital dashboard:', error);
-    return '<h1>Error loading dashboard</h1><p>Please try again later.</p>';
+module.exports = {
+  // REPLACE the existing renderHospitalDashboard function with this:
+    renderHospitalDashboard: async function(data = null) {
+        try {
+            // If data is provided with hospital info, use it
+            if (data && data.hospital) {
+                // Get doctors for this hospital
+                const doctorsResult = await query(
+                    'SELECT * FROM doctors WHERE hospital_id = $1', 
+                    [data.hospital.hospital_id]
+                );
+                
+                // Get medicines for this hospital
+                const medicinesResult = await query(
+                    'SELECT * FROM medicines WHERE hospital_id = $1', 
+                    [data.hospital.hospital_id]
+                );
+                
+                // Get labs for this hospital
+                const labsResult = await query(
+                    'SELECT * FROM lab_technicians WHERE hospital_id = $1', 
+                    [data.hospital.hospital_id]
+                );
+                
+                return getMainDashboardHTML(
+                    data.hospital,
+                    doctorsResult.rows || [],
+                    medicinesResult.rows || [],
+                    labsResult.rows || []
+                );
+            }
+            
+            // Fallback: Get first hospital from database
+            const hospitalResult = await query('SELECT * FROM hospitals LIMIT 1');
+            const doctorsResult = await query('SELECT * FROM doctors WHERE hospital_id = $1', [hospitalResult.rows[0]?.hospital_id]);
+            const medicinesResult = await query('SELECT * FROM medicines WHERE hospital_id = $1', [hospitalResult.rows[0]?.hospital_id]);
+            const labsResult = await query('SELECT * FROM lab_technicians WHERE hospital_id = $1', [hospitalResult.rows[0]?.hospital_id]);
+            
+            return getMainDashboardHTML(
+                hospitalResult.rows[0] || null,
+                doctorsResult.rows || [],
+                medicinesResult.rows || [],
+                labsResult.rows || []
+            );
+        } catch (error) {
+            console.error('Error loading hospital dashboard:', error);
+            return '<h1>Error loading dashboard</h1><p>Please try again later.</p>';
+        }
+    },
+  
+  getAddDoctorHTML: function() {
+    return getAddDoctorHTML();
+  },
+  
+  getAddSpecialityHTML: function() {
+    return getAddSpecialityHTML();
+  },
+  
+  getAddMedicineHTML: function() {
+    return getAddMedicineHTML();
+  },
+  
+  getAddLabHTML: function() {
+    return getAddLabHTML();
   }
 };

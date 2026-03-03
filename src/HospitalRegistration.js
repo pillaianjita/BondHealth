@@ -781,6 +781,20 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 flex-direction: column;
                 align-items: center;
             }
+            .remove-dept-btn {
+                border: none;
+                background: none;
+                color: white;
+                margin-left: 5px;
+                font-size: 1.2rem;
+                cursor: pointer;
+                padding: 0 5px;
+            }
+
+            .remove-dept-btn:hover {
+                opacity: 0.8;
+                transform: scale(1.1);
+            }
         }
     </style>
 </head>
@@ -882,8 +896,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                         <label class="form-label required">Hospital Type</label>
                         <div class="radio-group">
                             <div class="radio-option">
-                                <input type="radio" id="typeCroft" name="hospType" value="CROFT">
-                                <label class="radio-label" for="typeCroft">CROFT</label>
+                                <input type="radio" id="typeGovt" name="hospType" value="GOVT">
+                                <label class="radio-label" for="typeGovt">GOVT</label>
                             </div>
                             <div class="radio-option">
                                 <input type="radio" id="typePrivate" name="hospType" value="Private">
@@ -914,12 +928,13 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                         <div class="invalid-feedback" id="cityError">Please enter city/location.</div>
                     </div>
                     
-                    <div class="row">
-                        <div class="col-md-6 mb-4">
-                            <label for="contactNo" class="form-label required">Contact Number</label>
-                            <input type="tel" class="form-control" id="contactNo" placeholder="+91 9876543210">
-                            <div class="invalid-feedback" id="contactNoError">Please enter contact number.</div>
-                        </div>
+                   <div class="col-md-6 mb-4">
+    <label for="contactNo" class="form-label required">Contact Number</label>
+    <input type="tel" class="form-control" id="contactNo" placeholder="+91 9876543210" 
+           pattern="[0-9]{10}" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '')" required>
+    <div class="invalid-feedback" id="contactNoError">Please enter a valid 10-digit contact number.</div>
+    <small class="text-muted">Enter 10-digit mobile number without country code</small>
+</div>
                         
                         <div class="col-md-6 mb-4">
                             <label for="officialEmail" class="form-label required">Official Email</label>
@@ -967,20 +982,29 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 </div>
 
                 <!-- Departments Section -->
-                <div class="form-section">
-                    <h3 class="section-title"><i class="fas fa-stethoscope"></i> Departments Available</h3>
-                    
-                    <div class="mb-4">
-                        <label class="form-label required">Select Departments</label>
-                        <div class="departments-container" id="departmentsContainer">
-                            <!-- Departments will be added by JavaScript -->
-                        </div>
-                        <div class="invalid-feedback" id="departmentsError">Please select at least one department.</div>
-                        <div class="selected-departments">
-                            <strong>Selected Departments:</strong> <span id="selectedDeptsText">None selected</span>
-                        </div>
-                    </div>
-                </div>
+               <div class="form-section">
+    <h3 class="section-title"><i class="fas fa-stethoscope"></i> Departments Available</h3>
+    
+    <div class="mb-4">
+        <label class="form-label required">Select Departments</label>
+        <div class="departments-container" id="departmentsContainer">
+            <!-- Departments will be added by JavaScript -->
+        </div>
+        
+        <!-- Add Custom Department -->
+        <div class="input-group mt-3">
+            <input type="text" class="form-control" id="customDepartment" placeholder="Enter custom department">
+            <button class="btn btn-outline-info" type="button" onclick="addCustomDepartment()">
+                <i class="fas fa-plus"></i> Add Department
+            </button>
+        </div>
+        
+        <div class="invalid-feedback" id="departmentsError">Please select at least one department.</div>
+        <div class="selected-departments mt-3">
+            <strong>Selected Departments:</strong> <span id="selectedDeptsText">None selected</span>
+        </div>
+    </div>
+</div>
 
                 <!-- Documents Upload Section -->
                 <div class="form-section">
@@ -1392,6 +1416,80 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             });
         }
 
+// Function to add custom department
+function addCustomDepartment() {
+    const customDept = document.getElementById('customDepartment').value.trim();
+    if (customDept && !selectedDepartments.includes(customDept)) {
+        selectedDepartments.push(customDept);
+        renderDepartments();
+        document.getElementById('customDepartment').value = '';
+        clearError('departmentsError');
+    } else if (selectedDepartments.includes(customDept)) {
+        alert('This department is already selected');
+    } else {
+        alert('Please enter a department name');
+    }
+}
+
+// Updated renderDepartments function WITHOUT inline onclick (FIXED VERSION)
+function renderDepartments() {
+    const container = document.getElementById('departmentsContainer');
+    container.innerHTML = '';
+    
+    // Combine predefined and custom departments
+    const allDepartments = [...new Set([...departmentOptions, ...selectedDepartments])];
+    
+    allDepartments.forEach(dept => {
+        const chip = document.createElement('div');
+        chip.className = 'department-chip';
+        
+        if (selectedDepartments.includes(dept)) {
+            chip.classList.add('selected');
+            
+            // Create text node for department name
+            const deptText = document.createTextNode(dept);
+            chip.appendChild(deptText);
+            
+            // Create remove button (NO inline onclick)
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-dept-btn';
+            removeBtn.innerHTML = '×';
+            removeBtn.style.cssText = 'border:none; background:none; color:white; margin-left:5px; font-size:1.2rem; cursor:pointer;';
+            
+            // Add click event using addEventListener (FIXED)
+            removeBtn.addEventListener('click', function(e) {
+                e.stopPropagation(); // Prevent triggering chip click
+                removeDepartment(dept);
+            });
+            
+            chip.appendChild(removeBtn);
+        } else {
+            chip.textContent = dept;
+        }
+        
+        // Add click event to toggle department selection
+        chip.addEventListener('click', function(e) {
+            if (!e.target.classList.contains('remove-dept-btn')) {
+                toggleDepartment(dept);
+            }
+        });
+        
+        container.appendChild(chip);
+    });
+    
+    updateSelectedDepartmentsText();
+}
+
+// Function to remove department
+function removeDepartment(dept) {
+    const index = selectedDepartments.indexOf(dept);
+    if (index > -1) {
+        selectedDepartments.splice(index, 1);
+        renderDepartments();
+    }
+}
+
+        
         // Set up form submission
         function setupFormSubmission() {
               const form = document.getElementById('hospitalRegistrationForm');
@@ -1496,6 +1594,19 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 showError('contactNoError', 'Please enter contact number.');
                 isValid = false;
             }
+
+            // Add phone number validation
+document.getElementById('contactNo').addEventListener('blur', function() {
+    const phoneRegex = /^[0-9]{10}$/;
+    if (!phoneRegex.test(this.value)) {
+        document.getElementById('contactNoError').textContent = 'Please enter a valid 10-digit number';
+        document.getElementById('contactNoError').style.display = 'block';
+        this.classList.add('is-invalid');
+    } else {
+        document.getElementById('contactNoError').style.display = 'none';
+        this.classList.remove('is-invalid');
+    }
+});
             
             // Official Email
             const officialEmail = document.getElementById('officialEmail').value.trim();

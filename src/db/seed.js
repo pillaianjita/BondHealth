@@ -33,7 +33,7 @@ async function seedDatabase() {
       client.query(
         `INSERT INTO hospitals (hospital_uuid, name, type, city, phone, email) 
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING hospital_id`,
-        ['h4', 'City General Hospital', 'CROFT', 'Medical City', '+1 (555) 456-7890', 'contact@citygeneral.com']
+        ['h4', 'City General Hospital', 'Govt', 'Medical City', '+1 (555) 456-7890', 'contact@citygeneral.com']
       )
     ]);
 
