@@ -1732,7 +1732,9 @@ function getAddSpecialityHTML() {
                 
                 if (saveResponse.ok) {
                     alert('Department created successfully!');
+
                     window.location.href = '/admin-dashboard';
+
                 } else {
                     alert('Failed to create department');
                 }
@@ -2737,7 +2739,9 @@ function getAddMedicineHTML() {
                 
                 if (response.ok) {
                     alert('Medicine added successfully!');
+
                     window.location.href = '/admin-dashboard';
+
                 }
             } catch (error) {
                 console.error('Error:', error);
@@ -3261,7 +3265,7 @@ app.post('/api/hospital/add/lab', async (req, res) => {
   }
 });*/
 
-// At the bottom of Hospital.js, REPLACE the existing module.exports with:
+
 module.exports = {
   // REPLACE the existing renderHospitalDashboard function with this:
     renderHospitalDashboard: async function(data = null) {

@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS hospitals (
     hospital_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     hospital_uuid VARCHAR(50) UNIQUE,
     name VARCHAR(255) NOT NULL,
-    type VARCHAR(50) CHECK (type IN ('CROFT', 'Private', 'Clinic')),
+    type VARCHAR(50) CHECK (type IN ('Govt', 'Private', 'Clinic')),
     address TEXT,
     city VARCHAR(100),
     phone VARCHAR(20),
