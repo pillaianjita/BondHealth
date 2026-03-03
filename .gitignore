@@ -1,3 +1,28 @@
+# LaTeX temporary files
+*.aux
+*.bbl
+*.blg
+*.lof
+*.log
+*.lot
+*.fls
+*.out
+*.toc
+*.fmt
+*.fot
+*.cb
+*.cb2
+*.mtc
+*.synctex.gz
+*.fdb_latexmk
+*.run.xml
+*.bcf
+*.nav
+*.snm
+*.vrb
+*.xdv
+build/
+
 # Logs
 logs
 *.log
