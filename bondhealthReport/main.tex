@@ -25,7 +25,21 @@
 }
 
 % Line spacing
-\onehalfspacing
+\setstretch{1.15}
+
+%heading sizes
+\titleformat{\chapter}[display]
+  {\normalfont\bfseries\fontsize{14}{16}\selectfont}{\chaptertitlename\ \thechapter}{0pt}{}
+\titlespacing*{\chapter}{0pt}{-20pt}{20pt}
+
+\titleformat{\section}
+  {\normalfont\bfseries\fontsize{14}{16}\selectfont}{\thesection}{1em}{}
+
+\titleformat{\subsection}
+  {\normalfont\bfseries\fontsize{14}{16}\selectfont}{\thesubsection}{1em}{}
+
+\titleformat{\subsubsection}
+  {\normalfont\bfseries\fontsize{14}{16}\selectfont}{\thesubsubsection}{1em}{}
 
 % Hyperlink setup
 \hypersetup{
