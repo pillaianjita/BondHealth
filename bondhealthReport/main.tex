@@ -19,6 +19,12 @@
 \usepackage{xspace}
 \usepackage{microtype}
 \usepackage{ragged2e}
+\usepackage{pmboxdraw}
+
+% ============ FIX FOR MICROTYPE FONT EXPANSION ERROR ============
+% Disable font expansion for PDFLaTeX (fixes the fatal error)
+\microtypesetup{expansion=false}
+% ================================================================
 
 % ============ LISTINGS LANGUAGE DEFINITIONS ============
 % Define missing languages for listings
