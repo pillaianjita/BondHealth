@@ -1,4 +1,88 @@
-\documentclass{article}
+\documentclass[12pt,a4paper]{report}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{cite}
+
+% Page layout
+\geometry{
+    a4paper,
+    top=1in,
+    bottom=1in,
+    left=1.5in,
+    right=1in
+}
+
+% Line spacing
+\onehalfspacing
+
+% Hyperlink setup
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    pdftitle={Bond Health Report},
+    pdfpagemode=FullScreen,
+}
+
+% Table of contents depth
+\setcounter{tocdepth}{3}
+\setcounter{secnumdepth}{3}
+
+% Begin document
 \begin{document}
-Hello World! Testing my LaTeX setup.
+
+\pagenumbering{roman}
+
+% Include title page
+\include{title}
+
+% Include certificate
+\include{certificate}
+
+% Include declaration
+\include{declaration}
+
+% Include acknowledgement
+\include{acknowledgement}
+
+% Include abstract
+\include{abstract}
+
+\tableofcontents
+\listoffigures
+\listoftables
+
+\clearpage
+\pagenumbering{arabic}
+
+% Include chapters
+\include{chapter1_introduction}
+\include{chapter2_literature_review}
+\include{chapter3_system_study}
+\include{chapter4_system_design}
+\include{chapter5_implementation}
+\include{chapter6_technologies}
+\include{chapter7_testing}
+\include{chapter8_future_scope}
+\include{chapter9_conclusion}
+
+% Include references
+\include{references}
+
+% Include appendix
+\include{appendix}
+
 \end{document}
