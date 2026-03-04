@@ -157,10 +157,10 @@ app.post('/api/auth/register', async (req, res) => {
     // Insert patient profile (without emergency contact fields since they're not in the form)
     await client.query(
       `INSERT INTO patients (
-        user_id, full_name, email, phone, address, date_of_birth, gender
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        user_id, full_name, email, phone, address, date_of_birth, gender,blood_type
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
-        user.user_id, name, email, phone, address, dob, gender
+        user.user_id, name, email, phone, address, dob, gender, blood_type
       ]
     );
     console.log('✅ Patient profile created');

@@ -229,7 +229,6 @@ function generateSignUpHTML() {
        <div>
         <label for="phone" class="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
         <input type="tel" id="phone" name="phone" required class="form-input w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 transition-all duration-200" placeholder="+91 98765 43210" pattern="[+][9][1][0-9]{10}" title="Please enter +91 followed by 10 digits">
-        <p class="text-xs text-gray-500 mt-1">Indian format: +91 followed by 10 digits</p>
        </div>
        
        <!-- Address -->
