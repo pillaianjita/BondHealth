@@ -14,20 +14,21 @@
 \usepackage{xcolor}
 \usepackage{amsmath}
 \usepackage{cite}
+\usepackage{fancyhdr}  % For header and footer
 
-% Page layout
+% Page layout - REDUCED MARGINS
 \geometry{
     a4paper,
     top=1in,
     bottom=1in,
-    left=1.5in,
-    right=1in
+    left=1.2in,    % Reduced from 1.5in
+    right=0.8in     % Reduced from 1in
 }
 
 % Line spacing
 \setstretch{1.15}
 
-%heading sizes
+% Heading sizes
 \titleformat{\chapter}[display]
   {\normalfont\bfseries\fontsize{16}{20}\selectfont}{\chaptertitlename\ \thechapter}{20pt}{}
 \titlespacing*{\chapter}{0pt}{-20pt}{30pt}
@@ -55,6 +56,40 @@
 \setcounter{tocdepth}{3}
 \setcounter{secnumdepth}{3}
 
+% ============ HEADER AND FOOTER CONFIGURATION ============
+% Clear default fancy style
+\fancypagestyle{plain}{
+    \fancyhf{} % Clear all header and footer fields
+    \renewcommand{\headrulewidth}{0pt} % No header line for plain style
+    \renewcommand{\footrulewidth}{0pt} % No footer line for plain style
+}
+
+% Define our custom style - NORMAL FONT (not italic)
+\fancypagestyle{reportstyle}{
+    \fancyhf{} % Clear all header and footer fields
+    
+    % Header
+    \fancyhead[L]{BondHealth} % Project name on left side - NORMAL FONT
+    \fancyhead[R]{} % Nothing on right side
+    \renewcommand{\headrulewidth}{0.5pt} % Add a line below header
+    
+    % Footer
+    \fancyfoot[L]{Division of Computer Science} % Left side - NORMAL FONT
+    \fancyfoot[R]{Page \thepage} % Right side with page number - NORMAL FONT
+    
+}
+
+% Apply the style to all pages except chapter starting pages
+\pagestyle{reportstyle}
+
+% Ensure chapter pages use plain style (no header/footer)
+\let\oldchapter\chapter
+\renewcommand{\chapter}{
+    \thispagestyle{plain} % Chapter start page gets plain style (no header/footer)
+    \oldchapter
+}
+% =========================================================
+
 % Begin document
 \begin{document}
 
@@ -75,12 +110,16 @@
 % Include abstract
 \include{abstract}
 
+% These pages should have no header/footer
 \tableofcontents
 \listoffigures
 \listoftables
 
 \clearpage
 \pagenumbering{arabic}
+
+% From here onwards, header and footer will appear on all pages
+% except chapter starting pages
 
 % Include chapters
 \include{chapter1_introduction}
