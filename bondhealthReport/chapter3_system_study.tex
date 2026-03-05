@@ -1,79 +1,56 @@
 \chapter{System Study}
 
-The system study phase involves understanding the existing healthcare management challenges and analyzing the requirements for BondHealth. This chapter covers the problem definition, feasibility analysis, and detailed requirements gathering for the proposed system.
+The system study phase involves understanding existing healthcare management challenges and analyzing requirements for BondHealth. This chapter covers problem definition, feasibility analysis, and requirements gathering.
 
 \section{Existing System}
 
 \subsection{Current Healthcare Challenges}
 \begin{itemize}
-    \item \textbf{Fragmented Medical Records:} Patient data is scattered across different hospitals, clinics, and laboratories with no central access.
-    \item \textbf{Manual Appointment Management:} Many healthcare facilities still rely on phone calls and paper-based appointment scheduling.
-    \item \textbf{Delayed Lab Results:} Test reports take days to reach doctors and patients due to manual delivery systems.
-    \item \textbf{Lack of Patient Engagement:} Patients have limited access to their own health information and medical history.
-    \item \textbf{Administrative Inefficiency:} Hospital staff spend excessive time on paperwork and manual data entry.
+    \item \textbf{Fragmented Medical Records:} Patient data scattered across different healthcare facilities with no central access.
+    \item \textbf{Manual Appointment Management:} Reliance on phone calls and paper-based scheduling.
+    \item \textbf{Delayed Lab Results:} Reports take days to reach doctors due to manual delivery.
+    \item \textbf{Lack of Patient Engagement:} Limited patient access to their own health information.
+    \item \textbf{Administrative Inefficiency:} Excessive time spent on paperwork and manual data entry.
 \end{itemize}
 
 \subsection{Disadvantages of Existing System}
 \begin{itemize}
-    \item No centralized patient health record system
-    \item Increased wait times for appointments and results
+    \item No centralized patient health records
+    \item Increased wait times and communication gaps
     \item Higher chances of medical errors due to missing information
-    \item Poor communication between different healthcare providers
     \item Limited scalability for growing healthcare networks
 \end{itemize}
 
 \section{Proposed System}
 
 \subsection{System Overview}
-BondHealth is a web-based healthcare management platform that connects patients, doctors, hospitals, and laboratories on a single unified system. The platform provides:
-
+BondHealth is a web-based healthcare management platform connecting patients, doctors, hospitals, and laboratories on a unified system. The platform provides:
 \begin{itemize}
-    \item \textbf{Centralized Patient Records:} Complete medical history accessible to authorized healthcare providers
-    \item \textbf{Online Appointment System:} 24/7 appointment booking with real-time availability
-    \item \textbf{Digital Lab Reports:} Instant sharing of test results between labs, doctors, and patients
-    \item \textbf{Role-Based Dashboards:} Customized interfaces for different user types
+    \item \textbf{Centralized Patient Records:} Complete medical history accessible to authorized providers
+    \item \textbf{Online Appointment System:} 24/7 booking with real-time availability
+    \item \textbf{Digital Lab Reports:} Instant sharing of test results
+    \item \textbf{Role-Based Dashboards:} Customized interfaces for all user types
     \item \textbf{Secure Authentication:} JWT-based authentication with role-based access control
 \end{itemize}
 
 \subsection{Advantages of Proposed System}
 \begin{itemize}
-    \item Seamless access to patient medical history across all connected hospitals
-    \item Reduced wait times through online appointment scheduling
-    \item Instant delivery of lab reports to doctors and patients
+    \item Seamless access to patient history across connected hospitals
+    \item Reduced wait times and instant lab report delivery
     \item Enhanced patient engagement through personal health portal
-    \item Improved administrative efficiency with automated workflows
-    \item Scalable architecture for future expansion
+    \item Improved administrative efficiency and scalable architecture
 \end{itemize}
 
 \section{Feasibility Study}
 
 \subsection{Technical Feasibility}
-The system is technically feasible as it uses:
-\begin{itemize}
-    \item \textbf{Node.js \& Express:} Proven backend technology for building scalable web applications
-    \item \textbf{PostgreSQL:} Robust relational database with excellent performance and data integrity
-    \item \textbf{JWT Authentication:} Industry standard for secure API authentication
-    \item \textbf{Responsive Design:} Works seamlessly on desktops, tablets, and mobile devices
-\end{itemize}
+Uses proven technologies: Node.js/Express for backend, PostgreSQL for database, JWT for authentication, and responsive design for all devices.
 
 \subsection{Operational Feasibility}
-The system is operationally feasible because:
-\begin{itemize}
-    \item User-friendly interfaces require minimal training for staff
-    \item Role-based dashboards simplify daily tasks for each user type
-    \item Automated notifications reduce manual follow-up work
-    \item Centralized records eliminate redundant data entry
-\end{itemize}
+User-friendly interfaces require minimal training; role-based dashboards simplify daily tasks; automated workflows reduce manual work.
 
 \subsection{Economic Feasibility}
-The system offers significant economic benefits:
-\begin{itemize}
-    \item Reduced administrative costs through automation
-    \item Elimination of paper-based systems and storage
-    \item Improved staff productivity and efficiency
-    \item Scalable architecture grows with organizational needs
-    \item Open-source technology stack minimizes licensing costs
-\end{itemize}
+Reduces administrative costs, eliminates paper-based systems, improves staff productivity, and uses open-source technology to minimize licensing costs.
 
 \section{Requirements Analysis}
 
@@ -81,73 +58,45 @@ The system offers significant economic benefits:
 
 \subsubsection{Patient Module}
 \begin{itemize}
-    \item User registration and profile management
-    \item View and manage appointments
-    \item Book new appointments with available doctors
-    \item Access medical reports and prescriptions
-    \item Update personal and emergency contact information
-    \item Write and view public reviews
+    \item Registration, profile management, appointment booking
+    \item Access medical reports, prescriptions, and write reviews
 \end{itemize}
 
 \subsubsection{Doctor Module}
 \begin{itemize}
-    \item View today's appointment schedule
-    \item Access patient medical history
-    \item Review and add findings to lab reports
+    \item View appointments, access patient history, review lab reports
     \item Manage availability and leave requests
-    \item Communicate with patients
 \end{itemize}
 
 \subsubsection{Hospital Admin Module}
 \begin{itemize}
-    \item Register new doctors and staff
-    \item Manage medicine inventory
-    \item Add laboratory facilities
-    \item View hospital statistics and reports
-    \item Manage doctor leave schedules
+    \item Register doctors, manage medicine inventory, add labs
+    \item View statistics and manage doctor leave schedules
 \end{itemize}
 
 \subsubsection{Lab Technician Module}
 \begin{itemize}
-    \item Upload and manage lab reports
-    \item Update report status (pending/completed)
-    \item Share results with doctors and patients
-    \item View pending test requests
+    \item Upload reports, update status, share results with doctors/patients
 \end{itemize}
 
 \subsection{Non-Functional Requirements}
 
 \subsubsection{Performance Requirements}
 \begin{itemize}
-    \item Page load time should be less than 3 seconds
-    \item System should handle 1000+ concurrent users
-    \item Database queries should execute within 500ms
-    \item API response time under 200ms for standard operations
+    \item Page load < 3 seconds, handle 1000+ concurrent users
+    \item API response < 200ms for standard operations
 \end{itemize}
 
 \subsubsection{Security Requirements}
 \begin{itemize}
-    \item All passwords must be hashed using bcrypt
-    \item JWT tokens for API authentication with 7-day expiration
-    \item Role-based access control for all operations
-    \item Session management with active session tracking
-    \item Secure cookie handling with HttpOnly flag
+    \item Passwords hashed with bcrypt, JWT tokens with 7-day expiration
+    \item Role-based access control and secure HttpOnly cookies
 \end{itemize}
 
-\subsubsection{Usability Requirements}
+\subsubsection{Usability \& Reliability Requirements}
 \begin{itemize}
-    \item Intuitive interface requiring minimal training
-    \item Responsive design for all device sizes
-    \item Clear error messages and user feedback
-    \item Consistent navigation across all modules
-\end{itemize}
-
-\subsubsection{Reliability Requirements}
-\begin{itemize}
-    \item 99.9\% uptime during business hours
-    \item Data backup and recovery procedures
-    \item Transaction integrity for critical operations
-    \item Graceful error handling without data loss
+    \item Intuitive interface with responsive design
+    \item 99.9\% uptime, data backup, transaction integrity
 \end{itemize}
 
 \section{System Architecture Overview}
@@ -167,50 +116,21 @@ The system offers significant economic benefits:
 \label{fig:architecture}
 \end{figure}
 
-The BondHealth system follows a three-tier architecture:
-\begin{enumerate}
-    \item \textbf{Client Tier:} Web browsers render HTML pages with dynamic content fetched via API calls
-    \item \textbf{Application Tier:} Express.js server handles HTTP requests, implements business logic, and manages authentication
-    \item \textbf{Data Tier:} PostgreSQL database stores all application data with proper relationships and constraints
-\end{enumerate}
+The BondHealth system follows a three-tier architecture with client, application, and data tiers handling presentation, business logic, and data persistence respectively.
 
 \section{System Modules}
 
 \subsection{Authentication Module}
-Handles user registration, login, and session management. Implements:
-\begin{itemize}
-    \item JWT token generation and verification
-    \item Password hashing with bcrypt
-    \item Role-based access control
-    \item Session tracking and management
-\end{itemize}
+Handles JWT-based registration, login, session management, and role-based access control.
 
 \subsection{Patient Management Module}
-Manages all patient-related operations:
-\begin{itemize}
-    \item Profile creation and updates
-    \item Medical history tracking
-    \item Appointment scheduling
-    \item Report and prescription access
-\end{itemize}
+Manages profiles, medical history, appointments, and report access.
 
 \subsection{Appointment Management Module}
-Handles the complete appointment lifecycle:
-\begin{itemize}
-    \item Real-time availability checking
-    \item Appointment booking, rescheduling, and cancellation
-    \item Conflict detection and prevention
-    \item Status tracking and notifications
-\end{itemize}
+Handles real-time availability checking, booking, rescheduling, and cancellation.
 
 \subsection{Reporting Module}
-Manages lab reports and medical documents:
-\begin{itemize}
-    \item Report upload and storage
-    \item Status tracking (pending/reviewed)
-    \item Secure sharing between stakeholders
-    \item Historical data access
-\end{itemize}
+Manages lab report uploads, status tracking, and secure sharing between stakeholders.
 
 \section{User Roles and Permissions}
 
@@ -234,4 +154,4 @@ Lab Technician & Upload reports, update status, share results \\
 \end{table}
 
 \section{Summary}
-The system study phase has established a clear understanding of the existing healthcare challenges and defined comprehensive requirements for BondHealth. The proposed system addresses critical gaps in patient data management, appointment scheduling, and report sharing. With its modular architecture, role-based access control, and focus on usability, BondHealth is well-positioned to transform healthcare delivery in connected facilities.
+The system study has established clear requirements for BondHealth, addressing critical gaps in patient data management, appointment scheduling, and report sharing. The modular architecture with role-based access control positions BondHealth to effectively transform healthcare delivery in connected facilities.
