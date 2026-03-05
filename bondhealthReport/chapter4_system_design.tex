@@ -154,9 +154,47 @@ are never exposed through API responses.
 
 \justifying
 \noindent
+Referential integrity is enforced throughout the schema using foreign key constraints
+with carefully chosen cascade rules. Deleting a \texttt{users} record cascades to the
+corresponding role-specific profile row, ensuring no orphaned patient or doctor records
+remain after account removal. By contrast, \texttt{appointments} and \texttt{lab\_reports}
+use a restrict rule on their patient and doctor foreign keys, preventing accidental data
+loss for clinically significant records. This combination of cascade and restrict rules
+reflects the differing retention requirements across the schema.
+
+\justifying
+\noindent
+PostgreSQL's native array type is used for multi-value attributes such as a doctor's
+available weekdays and a patient's known allergies or chronic conditions. Storing these
+as arrays rather than in separate junction tables reduces join complexity for the most
+frequent read queries, while still supporting array-specific operators such as
+\texttt{@>} (contains) for availability filtering.
+
+\justifying
+\noindent
+Status fields across the schema use constrained string enumerations rather than integer
+codes, making query results self-documenting and reducing the risk of application-level
+mapping errors. For example, \texttt{appointments.status} accepts only the values
+\texttt{pending\_payment}, \texttt{confirmed}, \texttt{completed}, and \texttt{cancelled},
+enforced through a \texttt{CHECK} constraint. Similarly, \texttt{doctor\_leave.status}
+is constrained to \texttt{pending}, \texttt{approved}, and \texttt{rejected}, ensuring
+that the leave approval workflow cannot produce an unrecognised state in the database.
+
+\justifying
+\noindent
+All timestamp columns use \texttt{TIMESTAMPTZ} rather than a timezone-naive type,
+storing values in UTC and allowing the application layer to convert to the user's local
+timezone at render time. This is particularly important for a platform intended to support
+multiple hospital facilities, where doctors and patients may operate across different
+time zones. Consistent UTC storage eliminates ambiguity in scheduling queries and ensures
+that appointment slot comparisons remain correct regardless of the server's local
+timezone configuration.
+
+\justifying
+\noindent
 The schema is managed through a versioned migration system, capturing every structural
 change as an incremental script across development, staging, and production environments.
-New hospitals are provisioned without structural changes — seed scripts initialise default
+New hospitals are provisioned without structural changes --- seed scripts initialise default
 roles, department categories, and configuration records for each facility.
 
 \noindent
@@ -266,6 +304,22 @@ metadata. Caching headers are applied selectively to read-heavy endpoints to red
 database queries without sacrificing freshness for time-sensitive resources such as appointment
 slots. API versioning through \texttt{/api/v1/\ldots} supports future changes without breaking
 existing clients.
+
+\noindent
+Error responses follow a consistent JSON structure containing an error code, a human-readable
+message, and optional field-level validation details, enabling the frontend to surface
+meaningful feedback to users without additional parsing logic. All endpoints return appropriate
+HTTP status codes: \texttt{200} for successful retrieval, \texttt{201} for resource creation,
+\texttt{400} for validation failures, \texttt{401} for unauthenticated requests, \texttt{403}
+for authorisation violations, and \texttt{404} when a requested resource does not exist.
+
+\noindent
+The API also enforces per-user and per-IP rate limiting on sensitive endpoints such as login,
+registration, and payment initiation, reducing exposure to brute-force and denial-of-service
+attacks. For endpoints that trigger background operations --- such as appointment confirmation
+and lab report notification --- responses are returned immediately with a \texttt{202 Accepted}
+status while the background task completes asynchronously, keeping perceived response times
+low under load.
 
 \begin{table}[H]
     \small
