@@ -1091,3 +1091,24 @@ user experiences even under high load.
     \item Log aggregation for slow query analysis.
     \item Synthetic monitoring for critical user journeys.
 \end{itemize}
+
+% =============================================================================
+% 4.10 SUMMARY
+% =============================================================================
+
+\section{Summary}
+
+This chapter has presented the complete system design of the BondHealth platform,
+spanning the three-tier architecture, data flow diagrams, database schema, API design,
+module specifications, security architecture, and performance optimisation strategies.
+The design decisions made throughout this chapter reflect a consistent set of priorities:
+security of sensitive patient data, maintainability of a multi-role codebase, and
+scalability to accommodate growing institutional adoption. The layered separation between
+presentation, business logic, and data persistence ensures that each tier can evolve
+independently without disrupting the others. The database schema, anchored by UUID
+primary keys and enforced through foreign key constraints, provides a reliable foundation
+for the clinical workflows that the platform supports. The RESTful API layer exposes this
+functionality in a predictable, role-scoped manner, while the security architecture
+ensures that every access attempt is authenticated, authorised, and logged. The following
+chapter details the implementation of each module described here, translating these design
+specifications into working code.

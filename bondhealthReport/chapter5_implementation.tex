@@ -165,21 +165,62 @@ Lab technician accounts are created at \texttt{POST /admin/lab/create}, followin
 The admin views pending leave requests from \texttt{doctor\_leaves} where \texttt{status = 'pending'}. Approving a request issues an \texttt{UPDATE} setting \texttt{status = 'approved'}, which causes the availability query to begin excluding those dates for that doctor. Rejecting sets \texttt{status = 'rejected'} and optionally stores a rejection reason.
 
 % ─────────────────────────────────────────────────────────────────────────────
-\section{Lab Technician Module Implementation}
-\label{sec:lab}
+\subsection{Lab Technician Module Implementation}
 
-\subsection{Report Submission Form}
-\label{subsec:lab-form}
+\subsubsection{Report Submission Form}
 
-The report submission interface, shown in Figure~\ref{fig:lab-form}, is rendered by \texttt{GET /lab/report/new}. It walks the technician through a multi-step process within a single page:
+The report submission interface, shown in Figure 5.6, is rendered by
+\texttt{GET /lab/report/new}. It walks the technician through a structured
+multi-step process contained within a single page, reducing context-switching
+and minimising the risk of incomplete submissions. Each step is validated before
+the next becomes accessible, ensuring that the final payload sent to the server
+is complete and well-formed.
 
 \begin{enumerate}
-    \item \textbf{Patient selection} — a search field queries \texttt{patients} by name or patient ID and populates a dropdown.
-    \item \textbf{Test entry} — the technician selects or types the test name, enters the result value, and provides the reference range.
-    \item \textbf{Result validation} — client-side logic flags values that fall outside the reference range with a visual indicator before submission.
-    \item \textbf{File upload} — an optional PDF or image of the physical report can be attached; the file is saved to the \texttt{/public/uploads/reports/} directory and its path stored in \texttt{lab\_reports.file\_path}.
-    \item \textbf{Sharing preferences} — checkboxes determine whether the report is visible to the patient, the referring doctor, or both, setting the corresponding boolean columns in \texttt{lab\_reports}.
+    \item \textbf{Patient Selection} — A search field queries registered patients
+    by name or patient ID in real time, populating a dropdown with matching
+    results. Once a patient is selected, their basic details are displayed
+    alongside the field as a confirmation prompt, reducing the likelihood of
+    reports being assigned to the wrong individual in high-volume environments.
+
+    \item \textbf{Test Entry} — The technician selects or manually types the
+    test name from a pre-populated list of common diagnostic tests. The result
+    value and corresponding reference range are then entered into dedicated
+    fields. The test name list is scoped to the technician's hospital, ensuring
+    that only tests configured for that facility are presented as suggestions
+    while still allowing free-text entry for non-standard or specialist tests.
+
+    \item \textbf{Result Validation} — Client-side logic compares the entered
+    result value against the provided reference range immediately upon input.
+    Values that fall outside the normal range are flagged with a visual
+    indicator, drawing the technician's attention to potentially abnormal
+    findings before submission. This early flagging does not block submission
+    but serves as a safeguard against accidental data entry errors that could
+    otherwise go unnoticed until the report reaches the reviewing doctor.
+
+    \item \textbf{File Upload} — An optional PDF or image of the physical report
+    can be attached to the submission. The uploaded file is validated for type
+    and size on the client side before being transmitted to the server, where it
+    is saved to the \texttt{/public/uploads/reports/} directory. The resulting
+    file path is stored in the \texttt{lab\_reports.file\_path} column, allowing
+    the file to be retrieved and displayed through the patient and doctor
+    dashboards without duplicating the binary content in the database.
+
+    \item \textbf{Sharing Preferences} — A set of checkboxes at the final step
+    determines the visibility scope of the submitted report. The technician can
+    choose to make the report visible to the patient, the referring doctor, or
+    both parties simultaneously. These selections map directly to the
+    corresponding boolean columns in the \texttt{lab\_reports} table, giving
+    the technician fine-grained control over information disclosure in line with
+    the clinical instructions provided at the time of the test request.
 \end{enumerate}
+
+Upon successful submission, the form dispatches a \texttt{POST} request to
+\texttt{/lab/report/submit}, which validates the payload server-side, persists
+the record to the database, and returns a confirmation response. The technician
+is then redirected to the report list view, where the newly created entry
+appears at the top of the table with a timestamp and patient reference,
+providing immediate confirmation that the submission was recorded correctly.
 
 \begin{figure}[ht]
 \centering
@@ -236,3 +277,19 @@ Primary keys for \texttt{users}, \texttt{appointments}, \texttt{prescriptions}, 
 \label{subsec:indexes}
 
 Indexes are defined on the columns most frequently used in \texttt{WHERE} clauses: \texttt{appointments.patient\_id}, \texttt{appointments.doctor\_id}, \texttt{appointments.appointment\_date}, \texttt{lab\_reports.patient\_id}, and \texttt{doctor\_leaves.doctor\_id}. These indexes allow the dashboard and availability queries—which filter on combinations of these columns—to use index scans rather than sequential scans, keeping response times acceptable as the dataset grows.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Summary}
+\label{sec:implementation-summary}
+
+This chapter has presented a detailed account of the implementation of each
+module within the BondHealth platform. From the authentication layer through
+to the real-time messaging system, every component has been constructed with
+a consistent emphasis on security, data integrity, and maintainability. The
+layered architecture — separating routing, business logic, and database access
+— has ensured that each module remains independently testable and easy to
+extend. The use of parameterised queries, transactional inserts, and
+webhook-driven payment confirmation collectively reflect a production-grade
+approach to healthcare application development. The following chapter details
+the testing strategy employed to validate the correctness and robustness of
+the implementation described here.
