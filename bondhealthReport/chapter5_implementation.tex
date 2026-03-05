@@ -199,6 +199,7 @@ Below the submission form, the technician's home page renders a paginated table 
 
 Payment processing is integrated at \texttt{routes/payment.js}. When a patient confirms an appointment slot (Section~\ref{subsec:appt-booking}), the booking handler creates a payment intent by calling the payment gateway API with the consultation fee retrieved from \texttt{doctors.consultation\_fee}. The gateway returns a client secret that is passed to the EJS template; client-side JavaScript uses it to mount the payment widget and collect card details without those details ever touching the application server.
 
+\noindent
 On successful card authorisation, the gateway sends an asynchronous webhook \texttt{POST} to \texttt{/payment/webhook}. The webhook handler verifies the event signature using the gateway's signing secret, then updates the corresponding \texttt{appointments} row from \texttt{pending\_payment} to \texttt{confirmed}. Using the webhook rather than client-side redirection ensures that appointment confirmation is always driven by an authoritative server-to-server event, even if the patient closes the browser tab after payment.
 
 % ─────────────────────────────────────────────────────────────────────────────
@@ -207,6 +208,7 @@ On successful card authorisation, the gateway sends an asynchronous webhook \tex
 
 Real-time chat between patients and doctors is implemented with Socket.io, which is attached to the Express HTTP server at startup. When a user opens the messaging view, the client-side script connects to the Socket.io server and emits a \texttt{joinRoom} event carrying the appointment ID. The server places the socket into a named room derived from the appointment ID so that messages are isolated per consultation.
 
+\noindent
 Incoming \texttt{sendMessage} events are handled by a listener that persists the message to the \texttt{messages} table—capturing sender ID, room (appointment) ID, content, and timestamp—and then broadcasts a \texttt{receiveMessage} event to all sockets in the same room. Persisting messages before broadcasting means that a user who reconnects can retrieve the full conversation history from the database on the initial page load, independent of Socket.io's in-memory state. A Redis adapter is configured so that the Socket.io room registry is shared across multiple server instances, allowing horizontal scaling without losing room membership.
 
 % ─────────────────────────────────────────────────────────────────────────────
