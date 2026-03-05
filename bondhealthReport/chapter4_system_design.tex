@@ -328,6 +328,7 @@ hospital, enabling independent inventory management per facility, while the
 \texttt{payments} table maintains a one-to-one relationship with appointments, recording
 the full financial transaction lifecycle from initiation through gateway confirmation.
 
+
 \justifying
 \noindent
 The following table provides a concise summary of each core table, its purpose, and
@@ -356,6 +357,24 @@ its primary fields as implemented in the Neon PostgreSQL schema.
     are never exposed through API responses, and role-based access controls at the
     application layer ensure each user can only query data relevant to their role.
 \end{itemize}
+
+\justifying
+\noindent
+To support the long-term maintainability of the BondHealth platform, the database schema
+is managed through a versioned migration system. Each structural change --- whether adding
+a new column, introducing a junction table, or modifying a constraint --- is captured as an
+incremental migration script, allowing the schema to evolve in a controlled and reversible
+manner across development, staging, and production environments. This ensures that no
+ad-hoc alterations are made directly to the production database, reducing the risk of
+inconsistency between environments.
+
+\noindent
+The migration pipeline also plays a critical role in onboarding new hospital instances.
+Since each facility operates within the same shared schema but maintains logically isolated
+data through foreign key scoping, new hospitals can be provisioned without structural
+changes. Seed scripts initialise default roles, department categories, and configuration
+records for each new facility, ensuring a consistent baseline across all institutions from
+the moment they are onboarded.
 
 \begin{table}[H]
     \small
@@ -439,20 +458,49 @@ its primary fields as implemented in the Neon PostgreSQL schema.
 \section{API Design (RESTful Endpoints)}
 
 \justifying
+\noindent
 The BondHealth platform implements a comprehensive RESTful API architecture that follows
 industry best practices for web service design. All endpoints adhere to REST conventions
-with appropriate HTTP methods, consistent resource naming, and standardized response
+with appropriate HTTP methods, consistent resource naming, and standardised response
 formats. The API serves as the communication backbone between the presentation layer and
-the business logic, handling all data exchange between the four user roles and the
-server. Each endpoint is designed to perform a single, well-defined operation, making
-the API predictable and easy to consume by both the web interface and future mobile
-clients. Error responses follow a consistent JSON structure containing an error code,
-human-readable message, and optional field-level validation details, enabling the
-frontend to provide meaningful feedback to users. All protected endpoints require a
-valid JWT token delivered via HTTP-only cookie, ensuring that unauthenticated requests
-are rejected at the middleware level before reaching any business logic. The table below
-documents the core API endpoints currently implemented in the BondHealth platform,
-organized by resource and access level.
+the business logic, handling all data exchange between the four user roles and the server.
+
+\noindent
+Each endpoint is designed to perform a single, well-defined operation, making the API
+predictable and easy to consume by both the web interface and future mobile clients. Error
+responses follow a consistent JSON structure containing an error code, human-readable
+message, and optional field-level validation details, enabling the frontend to provide
+meaningful feedback to users. All protected endpoints require a valid JWT token delivered
+via HTTP-only cookie, ensuring that authentication state is never exposed to client-side
+JavaScript and remains resistant to cross-site scripting attacks.
+
+\noindent
+The API is organised into logical resource groups that mirror the core domain entities of
+the platform. Separate route modules handle authentication, patient management, doctor
+operations, appointment scheduling, laboratory workflows, prescription handling, and
+administrative functions. This modular structure not only improves code maintainability but
+also allows middleware to be applied selectively at the router level, meaning that role
+verification, request validation, and rate limiting can each be scoped precisely to the
+endpoints that require them.
+
+\noindent
+Request validation is enforced at the boundary of each endpoint using a dedicated schema
+validation layer. Incoming payloads are checked for type correctness, required field
+presence, and domain-specific constraints --- such as ensuring appointment times fall within
+a doctor's available schedule --- before any business logic is executed. This fail-fast
+approach prevents malformed data from propagating into the service layer or the database,
+reducing the surface area for both bugs and security vulnerabilities.
+
+\noindent
+The API also implements consistent pagination across all list-returning endpoints. Rather
+than returning unbounded result sets, every collection endpoint accepts \texttt{page} and
+\texttt{limit} query parameters and returns a standardised envelope containing the data
+array, total record count, and current page metadata. This design ensures predictable
+memory consumption on both the server and the client, and lays the groundwork for
+cursor-based pagination as data volumes grow. Caching headers are applied selectively to
+read-heavy endpoints such as hospital listings and doctor availability, reducing redundant
+database queries under high concurrency without sacrificing data freshness for
+time-sensitive resources such as appointment slots.
 
 \textbf{API Design Principles:}
 
@@ -714,24 +762,31 @@ and scheduling appointments with doctors.
 % =============================================================================
 % 4.6 SECURITY ARCHITECTURE
 % =============================================================================
-\clearpage
 \section{Security Architecture}
 
 \justifying
 The BondHealth platform implements a comprehensive, defense-in-depth security architecture
-to protect sensitive healthcare data and ensure regulatory compliance.
+to protect sensitive healthcare data and ensure regulatory compliance. Security is treated
+not as a peripheral concern but as a foundational requirement embedded at every layer of
+the system, from database constraints and API middleware through to client-side token
+handling and session management.
 
 \textbf{Security Principles:}
-
 \begin{itemize}
-    \item \textbf{Defense in Depth}: Multiple layers of security controls ensure that if
+    \item \textbf{Defense in Depth:} Multiple layers of security controls ensure that if
     one layer fails, others continue to provide protection.
-    \item \textbf{Least Privilege}: Users and services have only the minimum permissions
-    necessary to perform their functions.
-    \item \textbf{Secure by Default}: Default configurations are secure, requiring explicit
-    actions to reduce security.
-    \item \textbf{Complete Mediation}: Every access attempt is checked for authorization,
-    not just the first.
+
+    \item \textbf{Least Privilege:} Users and services have only the minimum permissions
+    necessary to perform their functions, limiting the potential blast radius of any
+    compromised account or service.
+
+    \item \textbf{Secure by Default:} Default configurations are secure, requiring explicit
+    actions to reduce security controls rather than to enable them, ensuring that
+    misconfiguration cannot silently weaken the system's protective posture.
+
+    \item \textbf{Complete Mediation:} Every access attempt is checked for authorisation,
+    not just the first, ensuring that no request can bypass role verification through
+    session replay, token reuse, or direct resource access via guessed identifiers.
 \end{itemize}
 
 \begin{table}[H]
