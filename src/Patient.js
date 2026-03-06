@@ -840,7 +840,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
                 </div>
                 <div>
                   <label class="block text-sm font-medium cyan-text mb-2">Email</label>
-                  <input type="email" id="editEmail" value="${patient.email}" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                  <input type="email" id="editEmail" value="${patient.email}" readonly class="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-100 cursor-not-allowed">
                 </div>
                 <div>
                   <label class="block text-sm font-medium cyan-text mb-2">Phone</label>
