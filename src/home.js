@@ -236,6 +236,31 @@ app.post('/api/lab/upload-report', authenticate, authorize('lab'), upload.single
         
         const labTechId = labTechResult.rows[0].lab_tech_id;
         
+        // Get patient_id from patient_uuid (friendly ID like PT-20260306-3907)
+        const patientResult = await client.query(
+            'SELECT patient_id FROM patients WHERE patient_uuid = $1',
+            [patientId]
+        );
+        
+        if (patientResult.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Patient not found with ID: ' + patientId });
+        }
+        
+        const actualPatientId = patientResult.rows[0].patient_id;
+        
+        // Get doctor_id from doctor_uuid (friendly ID like DR-2024-0567) if provided
+        let actualDoctorId = null;
+        if (doctorId && doctorId.trim() !== '') {
+            const doctorResult = await client.query(
+                'SELECT doctor_id FROM doctors WHERE doctor_uuid = $1',
+                [doctorId]
+            );
+            
+            if (doctorResult.rows.length > 0) {
+                actualDoctorId = doctorResult.rows[0].doctor_id;
+            }
+        }
+        
         // Upload file info
         const fileData = await storageService.uploadFile(req.file, 'reports');
         
@@ -252,8 +277,8 @@ app.post('/api/lab/upload-report', authenticate, authorize('lab'), upload.single
             RETURNING report_id, report_uuid`,
             [
                 reportUUID,
-                patientId,
-                doctorId || null,
+                actualPatientId,
+                actualDoctorId,
                 labTechId,
                 testType,
                 findings || 'No findings',
@@ -1293,6 +1318,50 @@ app.get('/api/patient', authenticate, authorize('patient'), async (req, res) => 
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// Get patient history for lab technician
+app.get('/api/patient-history', authenticate, authorize('lab'), async (req, res) => {
+    try {
+        // Get lab technician ID
+        const labTechResult = await query(
+            'SELECT lab_tech_id FROM lab_technicians WHERE user_id = $1',
+            [req.user.id]
+        );
+        
+        if (labTechResult.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Lab technician not found' });
+        }
+        
+        const labTechId = labTechResult.rows[0].lab_tech_id;
+        
+        const result = await query(
+            `SELECT 
+                lr.report_id,
+                lr.report_uuid as id,
+                p.full_name as name,
+                p.patient_uuid as patient_id,
+                lr.test_type,
+                lr.test_date as date,
+                lr.status,
+                lr.priority,
+                lr.created_at,
+                d.doctor_uuid as doctor_id,
+                d.full_name as doctor_name
+             FROM lab_reports lr
+             JOIN patients p ON lr.patient_id = p.patient_id
+             LEFT JOIN doctors d ON lr.doctor_id = d.doctor_id
+             WHERE lr.lab_tech_id = $1
+             ORDER BY lr.created_at DESC
+             LIMIT 50`,
+            [labTechId]
+        );
+        
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching patient history:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
 });
 
 app.get('/api/appointments', authenticate, async (req, res) => {

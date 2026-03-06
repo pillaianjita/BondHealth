@@ -1,27 +1,23 @@
-// storage.js - Handle file uploads
+// storage.js
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 
 // Ensure upload directories exist
-const createUploadDirs = () => {
-    const dirs = [
-        './uploads',
-        './uploads/reports',
-        './uploads/scans',
-        './uploads/temp'
-    ];
-    
-    dirs.forEach(dir => {
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-            console.log(`Created directory: ${dir}`);
-        }
-    });
-};
+const uploadDirs = [
+    './uploads',
+    './uploads/reports',
+    './uploads/scans',
+    './uploads/temp'
+];
 
-createUploadDirs();
+uploadDirs.forEach(dir => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        console.log(`Created directory: ${dir}`);
+    }
+});
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -41,23 +37,20 @@ const storage = multer.diskStorage({
     }
 });
 
-// File filter - allow only certain file types
+// File filter
 const fileFilter = (req, file, cb) => {
     const allowedTypes = [
         'image/jpeg', 'image/jpg', 'image/png', 'image/gif',
-        'application/pdf',
-        'application/dicom', 
-        'application/octet-stream'
+        'application/pdf'
     ];
     
     if (allowedTypes.includes(file.mimetype)) {
         cb(null, true);
     } else {
-        cb(new Error('Invalid file type. Only images, PDFs, and DICOM files are allowed.'), false);
+        cb(new Error('Invalid file type. Only images and PDFs are allowed.'), false);
     }
 };
 
-// Configure upload middleware
 const upload = multer({
     storage: storage,
     limits: {
@@ -66,10 +59,8 @@ const upload = multer({
     fileFilter: fileFilter
 });
 
-// Simple storage service (local files for now)
 class StorageService {
     async uploadFile(file, folder = 'reports') {
-        // For now, just return the local path
         return {
             url: `/uploads/${folder}/${path.basename(file.path)}`,
             filename: path.basename(file.path),
@@ -77,15 +68,6 @@ class StorageService {
             size: file.size,
             mimetype: file.mimetype
         };
-    }
-
-    async deleteFile(filename, folder = 'reports') {
-        const filePath = path.join('./uploads', folder, filename);
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-            return true;
-        }
-        return false;
     }
 }
 

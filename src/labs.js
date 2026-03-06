@@ -99,7 +99,7 @@ async function getPatientHistory(labTechId) {
 async function getRecentPatients(labTechId) {
     try {
         const result = await query(
-            `SELECT DISTINCT p.patient_uuid
+            `SELECT DISTINCT p.patient_uuid, lr.created_at
              FROM lab_reports lr
              JOIN patients p ON lr.patient_id = p.patient_id
              WHERE lr.lab_tech_id = $1
@@ -997,6 +997,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
         // Form Submission
         // Form Submission
         // Form Submission
+        // Form Submission
         document.getElementById('submitReport').addEventListener('click', async function(e) {
             e.preventDefault();
             
@@ -1009,7 +1010,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             const sendTo = document.querySelector('input[name="sendTo"]:checked').value;
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
-            const fileName = file ? file.name : 'No file';
             
             // Basic validation
             if (!pid || !testType || !testResults) {
@@ -1035,40 +1035,36 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             btn.disabled = true;
             btn.innerHTML = '<span>⏳</span> Uploading...';
             
-            // Create data object
-            const data = {
-                pid: pid,
-                docId: docId,
-                testType: testType,
-                priority: priority,
-                testResults: testResults,
-                sendTo: sendTo,
-                hasFile: true,
-                fileName: file.name,
-                fileSize: file.size,
-                fileType: file.type
-            };
+            // Create FormData for file upload
+            const formData = new FormData();
+            formData.append('report', file);
+            formData.append('patientId', pid);
+            formData.append('doctorId', docId || '');
+            formData.append('testType', testType);
+            formData.append('priority', priority);
+            formData.append('findings', testResults);
+            formData.append('sendTo', sendTo);
             
             // Send to server
-            fetch('/api/send-report', {
+            fetch('/api/lab/upload-report', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
                     'X-User-Id': document.getElementById('techId').value
+                    // Don't set Content-Type - browser will set it with boundary for FormData
                 },
-                body: JSON.stringify(data)
+                body: formData
             })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    // Show success message - use fileName variable that's already defined
+                    // Show success message
                     const successMessage = document.getElementById('successMessage');
                     let recipientText = '';
                     if (sendTo === 'doctor') recipientText = 'Doctor';
                     else if (sendTo === 'patient') recipientText = 'Patient';
                     else recipientText = 'Doctor & Patient';
                     
-                    successMessage.querySelector('.success-text').textContent = "Report for Patient " + pid + " sent to " + recipientText + " with file: " + fileName;
+                    successMessage.querySelector('.success-text').textContent = "Report for Patient " + pid + " sent to " + recipientText + " with file: " + file.name;
                     successMessage.classList.add('show');
                     
                     // Reset form
