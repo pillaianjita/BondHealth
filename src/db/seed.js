@@ -65,7 +65,7 @@ async function seedDatabase() {
 
     const [patientUser, doctorUser, adminUser, labUser] = users.map(u => u.rows[0].user_id);
 
-    // 3. Insert Patient
+    // 3. Insert Patient  
     await client.query(
       `INSERT INTO patients (
         user_id, patient_uuid, full_name, date_of_birth, gender, 
@@ -73,12 +73,11 @@ async function seedDatabase() {
         emergency_contact_phone, medical_conditions, allergies, last_visit, next_appointment
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
-        patientUser, 'PT-2024-0847', 'Alex Johnson', '1992-05-15', 'Male',
-        'O-', '+1 (555) 123-4567', 'alex.johnson@email.com', '123 Health Street, Medical City',
-        'Jane Johnson (Wife)', '+1 (555) 987-6543', 
-        ['Hypertension', 'Asthma'], ['Penicillin'], '2024-11-15', '2024-12-20'
+        userId,patientUUID,patientData.name,patientData.dob,patientData.gender,patientData.blood_type,
+        patientData.phone,patientData.email,patientData.address,'','',[],[],null,null
       ]
     );
+
 
     // 4. Insert Doctor
     await client.query(

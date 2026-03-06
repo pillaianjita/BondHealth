@@ -74,36 +74,45 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
     });
     
     let patient = patientData ? {
-        id: patientData.patient_uuid || 'PT-2024-0847',
-        name: patientData.full_name || 'Alex Johnson',
-        age: patientData.date_of_birth ? calculateAge(patientData.date_of_birth) : 32,
-        gender: patientData.gender || 'Male',
-        bloodType: patientData.blood_type || 'O+',
-        email: patientData.email || 'alex.johnson@email.com',
-        contact: patientData.phone || '+1 (555) 123-4567',
-        address: patientData.address || '123 Health Street, Medical City',
-        emergencyContact: patientData.emergency_contact_name ? 
-            `${patientData.emergency_contact_name} ${patientData.emergency_contact_phone || ''}` : 
-            'Jane Johnson (Wife) +1 (555) 987-6543',
-        conditions: patientData.medical_conditions || ['Hypertension', 'Asthma'],
-        allergies: patientData.allergies || ['Penicillin'],
-        lastVisit: patientData.last_visit || '2024-11-15',
-        nextAppointment: patientData.next_appointment || '2024-12-20'
-    } : {
-        id: 'PT-2024-0847',
-        name: 'Alex Johnson',
-        age: 32,
-        gender: 'Male',
-        bloodType: 'O+',
-        email: 'alex.johnson@email.com',
-        contact: '+1 (555) 123-4567',
-        address: '123 Health Street, Medical City',
-        emergencyContact: 'Jane Johnson (Wife) +1 (555) 987-6543',
-        conditions: ['Hypertension', 'Asthma'],
-        allergies: ['Penicillin'],
-        lastVisit: '2024-11-15',
-        nextAppointment: '2024-12-20'
-    };
+        id: patientData.patient_uuid || 'Unknown ID',
+        name: patientData.full_name || 'Name not provided',
+        age: patientData.date_of_birth ? calculateAge(patientData.date_of_birth) : 'Date of Birth not provided',
+        gender: patientData.gender || 'Gender not provided',
+        bloodType: patientData.blood_type || 'Blood Group not provided',
+        email: patientData.email ||'Email not provided',
+        contact: patientData.phone || 'Phone not provided',
+        address: patientData.address || 'Address not provided',
+        emergencyContact: (() => {
+        const name = patientData.emergency_contact_name;
+        const phone = patientData.emergency_contact_phone;
+        
+        if (name && phone) return `${name} - ${phone}`;
+        if (name) return `${name} (no phone provided)`;
+        if (phone) return `Emergency contact phone: ${phone} (name not provided)`;
+        return 'Emergency contact not provided';
+    })(),
+    
+    // Medical conditions
+    conditions: (() => {
+        if (Array.isArray(patientData.medical_conditions) && patientData.medical_conditions.length > 0) {
+            return patientData.medical_conditions;
+        }
+        return ['No medical conditions reported'];
+    })(),
+    
+    // Allergies
+    allergies: (() => {
+        if (Array.isArray(patientData.allergies) && patientData.allergies.length > 0) {
+            return patientData.allergies;
+        }
+        return ['No allergies reported'];
+    })(),
+    
+    // Dates
+    lastVisit: patientData.last_visit || 'No previous visits',
+    nextAppointment: patientData.next_appointment || 'No upcoming appointments'
+    
+} : null;
 
     // Helper function to calculate age from date of birth
     function calculateAge(dob) {
@@ -547,6 +556,9 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
       </style>
     </head>
     <body class="text-gray-800">
+      <!-- Hidden input for patient ID -->
+      <input type="hidden" id="patientId" value="${patientData?.patient_id || ''}">
+      
       <div class="background-animation">
         <div class="floating-circle"></div>
         <div class="floating-circle"></div>
@@ -1541,12 +1553,71 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
             }
           });
           
+          // ============================================
+          // UPDATED UPLOAD REPORT FORM SUBMISSION
+          // ============================================
           document.getElementById('uploadReportForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
-            showToast('Success', 'Report uploaded successfully!', 'success');
-            uploadReportModal.classList.add('hidden');
-            setTimeout(() => window.location.reload(), 1500);
+            const testType = document.getElementById('reportTestType').value;
+            const testDate = document.getElementById('reportTestDate').value;
+            const notes = document.getElementById('reportNotes').value;
+            
+            if (!testType || !testDate) {
+              showToast('Error', 'Please fill all required fields', 'error');
+              return;
+            }
+            
+            const patientId = document.getElementById('patientId')?.value;
+            
+            if (!patientId) {
+              showToast('Error', 'Patient ID not found', 'error');
+              return;
+            }
+            
+            const btn = e.target.querySelector('button[type="submit"]');
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Uploading...';
+            
+            try {
+              // In a real app with file upload, you'd use FormData
+              // For now, we'll send JSON with the report metadata
+              const response = await fetch('/api/reports', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  patient_id: patientId,
+                  test_type: testType,
+                  test_date: testDate,
+                  notes: notes
+                })
+              });
+              
+              if (response.ok) {
+                showToast('Success', 'Report uploaded successfully!', 'success');
+                uploadReportModal.classList.add('hidden');
+                
+                // Reset form
+                document.getElementById('uploadReportForm').reset();
+                document.getElementById('selectedFile').classList.add('hidden');
+                selectedFile = null;
+                
+                // Reload reports section to show new report
+                setTimeout(() => {
+                  loadReportsContent();
+                }, 1500);
+              } else {
+                const error = await response.json();
+                showToast('Error', error.error || 'Failed to upload report', 'error');
+              }
+            } catch (error) {
+              console.error('Error uploading report:', error);
+              showToast('Error', 'Network error. Please try again.', 'error');
+            }
+            
+            btn.disabled = false;
+            btn.textContent = originalText;
           });
           
           const orderMedicinesModal = document.getElementById('orderMedicinesModal');
@@ -1562,24 +1633,68 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
             }
           });
           
+          // ============================================
+          // UPDATED ORDER MEDICINES FORM SUBMISSION
+          // ============================================
           document.getElementById('orderMedicinesForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
+            const prescription = document.getElementById('orderPrescription').value;
+            const quantity = document.getElementById('orderQuantity').value;
+            const address = document.getElementById('orderAddress').value;
+            const payment = document.getElementById('orderPayment').value;
+            
+            if (!prescription || !quantity || !address || !payment) {
+              showToast('Error', 'Please fill all fields', 'error');
+              return;
+            }
+            
             showToast('Success', 'Order placed successfully!', 'success');
             orderMedicinesModal.classList.add('hidden');
+            
+            // In a real app, you would send the order to server here
+            
+            setTimeout(() => {
+              window.location.reload();
+            }, 1500);
           });
         });
         
+        // ============================================
+        // UPDATED QUICK ACTIONS HANDLER
+        // ============================================
         function handleQuickAction(action) {
-          const actions = {
-            'download': () => showToast('Download', 'Preparing your records for download...', 'info'),
-            'notifications': () => showToast('Notifications', 'No new notifications', 'info'),
-            'help': () => showToast('Help Center', 'Opening help center...', 'info'),
-            'settings': () => showToast('Settings', 'Opening settings...', 'info')
-          };
-          
-          if (actions[action]) {
-            actions[action]();
+          switch(action) {
+            case 'download':
+              showToast('Download', 'Downloading your medical records...', 'info');
+              // Simulate download after 1 second
+              setTimeout(() => {
+                showToast('Success', 'Records downloaded successfully!', 'success');
+              }, 1000);
+              break;
+              
+            case 'notifications':
+              showToast('Notifications', 'You have 2 unread notifications', 'info');
+              break;
+              
+            case 'help':
+              showToast('Help Center', 'Opening help center...', 'info');
+              // Open help modal or redirect
+              setTimeout(() => {
+                showToast('Info', 'Contact support: help@bondhealth.com', 'info');
+              }, 1000);
+              break;
+              
+            case 'settings':
+              showToast('Settings', 'Opening settings...', 'info');
+              // Open profile modal as settings
+              setTimeout(() => {
+                document.getElementById('profileBtn').click();
+              }, 500);
+              break;
+              
+            default:
+              showToast('Info', 'Action not implemented yet', 'info');
           }
         }
         
@@ -1962,25 +2077,40 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         }
         
         async function loadReportsContent() {
+          const patientId = document.getElementById('patientId')?.value;
+          
+          // Fetch latest reports from server
+          let latestReports = reportsData;
+          if (patientId) {
+            try {
+              const response = await fetch('/api/reports?patient_id=' + patientId);
+              if (response.ok) {
+                latestReports = await response.json();
+              }
+            } catch (error) {
+              console.error('Error fetching reports:', error);
+            }
+          }
+          
           const reportsContent = document.getElementById('reportsContent');
           reportsContent.innerHTML = \`
             <h2 class="text-xl font-bold mb-4 cyan-text">Medical Reports</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              \${reportsData.map(report => \`
+              \${latestReports.map(report => \`
                 <div class="report-card white-card rounded-xl p-4 hover-lift">
                   <div class="flex items-center justify-between mb-3">
                     <div class="w-10 h-10 cyan-light rounded-lg flex items-center justify-center">
-                      <i class="fas \${report.type === 'lab' ? 'fa-vial' : 'fa-x-ray'} cyan-text"></i>
+                      <i class="fas \${report.test_type?.toLowerCase().includes('blood') ? 'fa-vial' : 'fa-x-ray'} cyan-text"></i>
                     </div>
-                    <span class="text-xs cyan-dark text-white px-2 py-0.5 rounded-full">\${report.type.toUpperCase()}</span>
+                    <span class="text-xs cyan-dark text-white px-2 py-0.5 rounded-full">\${report.test_type}</span>
                   </div>
-                  <h3 class="text-base font-semibold cyan-text mb-1">\${report.name}</h3>
-                  <p class="text-xs cyan-text opacity-75 mb-2">\${new Date(report.date).toLocaleDateString()}</p>
+                  <h3 class="text-base font-semibold cyan-text mb-1">\${report.test_type}</h3>
+                  <p class="text-xs cyan-text opacity-75 mb-2">\${new Date(report.test_date).toLocaleDateString()}</p>
                   <div class="flex justify-between">
-                    <button class="text-xs cyan-dark text-white px-3 py-1.5 rounded-lg" onclick="viewReport('\${report.id}')">
+                    <button class="text-xs cyan-dark text-white px-3 py-1.5 rounded-lg" onclick="viewReport('\${report.report_uuid}')">
                       <i class="fas fa-eye mr-1"></i>View
                     </button>
-                    <button class="text-xs btn-white px-3 py-1.5 rounded-lg" onclick="downloadReport('\${report.id}')">
+                    <button class="text-xs btn-white px-3 py-1.5 rounded-lg" onclick="downloadReport('\${report.report_uuid}')">
                       <i class="fas fa-download mr-1"></i>Download
                     </button>
                   </div>

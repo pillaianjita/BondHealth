@@ -639,68 +639,129 @@ app.get('/api/doctors/on-leave', authenticate, authorize('admin'), async (req, r
 });
 
 // Remove/end leave (when doctor returns)
+// REPLACE the existing DELETE /api/doctors/:doctorId/leave route in home.js with this fixed version.
+// Bug fixed: PostgreSQL does not support ORDER BY / LIMIT directly in UPDATE statements.
+// Solution: use a subquery to find the leave_id first, then update by that id.
+
 app.delete('/api/doctors/:doctorId/leave', authenticate, authorize('admin'), async (req, res) => {
   const client = await getClient();
   try {
     await client.query('BEGIN');
-    
+
     const { doctorId } = req.params;
-    
+
     // Validate UUID format
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(doctorId)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ success: false, message: 'Invalid doctor ID format' });
     }
-    
+
     // Get hospital_id from the admin
     const adminResult = await client.query(
       `SELECT hospital_id FROM hospital_admins WHERE user_id = $1`,
       [req.user.id]
     );
-    
+
     const hospitalId = adminResult.rows[0]?.hospital_id;
-    
     if (!hospitalId) {
       await client.query('ROLLBACK');
       return res.status(404).json({ success: false, message: 'Hospital not found' });
     }
-    
+
     // Update doctor status back to 'Available'
     const doctorUpdate = await client.query(
-      `UPDATE doctors SET status = 'Available' 
-       WHERE doctor_id = $1::uuid AND hospital_id = $2::uuid 
+      `UPDATE doctors SET status = 'Available'
+       WHERE doctor_id = $1::uuid AND hospital_id = $2::uuid
        RETURNING *`,
       [doctorId, hospitalId]
     );
-    
+
     if (doctorUpdate.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ success: false, message: 'Doctor not found in your hospital' });
     }
-    
-    // Mark the most recent active leave as completed
+
+    // FIX: PostgreSQL does not support ORDER BY / LIMIT in UPDATE.
+    // Find the most recent active leave_id first, then update it.
     await client.query(
-      `UPDATE doctor_leave 
-       SET status = 'Completed' 
-       WHERE doctor_id = $1::uuid 
-         AND status = 'Approved' 
-         AND to_date >= CURRENT_DATE
-       ORDER BY created_at DESC 
-       LIMIT 1`,
+      `UPDATE doctor_leave
+       SET status = 'Completed'
+       WHERE leave_id = (
+         SELECT leave_id
+         FROM doctor_leave
+         WHERE doctor_id = $1::uuid
+           AND status = 'Approved'
+           AND to_date >= CURRENT_DATE
+         ORDER BY created_at DESC
+         LIMIT 1
+       )`,
       [doctorId]
     );
-    
+
     await client.query('COMMIT');
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       message: 'Leave removed, doctor is now available',
       data: doctorUpdate.rows[0]
     });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error removing leave:', error);
+    res.status(500).json({ success: false, message: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ... existing leave delete route above ...
+
+app.delete('/api/doctors/:doctorId', authenticate, authorize('admin'), async (req, res) => {
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+
+    const { doctorId } = req.params;
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(doctorId)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'Invalid doctor ID format' });
+    }
+
+    const adminResult = await client.query(
+      'SELECT hospital_id FROM hospital_admins WHERE user_id = $1',
+      [req.user.id]
+    );
+    const hospitalId = adminResult.rows[0]?.hospital_id;
+    if (!hospitalId) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Hospital not found' });
+    }
+
+    const doctorCheck = await client.query(
+      'SELECT user_id FROM doctors WHERE doctor_id = $1::uuid AND hospital_id = $2::uuid',
+      [doctorId, hospitalId]
+    );
+    if (doctorCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Doctor not found in your hospital' });
+    }
+
+    const doctorUserId = doctorCheck.rows[0].user_id;
+
+    await client.query(`UPDATE appointments SET status = 'cancelled' WHERE doctor_id = $1::uuid AND appointment_date >= CURRENT_DATE`, [doctorId]);
+    await client.query(`UPDATE doctors SET status = 'Inactive' WHERE doctor_id = $1::uuid`, [doctorId]);
+    await client.query(`UPDATE users SET is_active = false WHERE user_id = $1::uuid`, [doctorUserId]);
+
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Doctor removed successfully' });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting doctor:', error);
     res.status(500).json({ success: false, message: error.message });
   } finally {
     client.release();
@@ -1060,7 +1121,7 @@ app.get('/api/doctors', authenticate, async (req, res) => {
       `SELECT d.*, h.name as hospital_name 
        FROM doctors d
        JOIN hospitals h ON d.hospital_id = h.hospital_id
-       WHERE d.status = 'Available'
+       WHERE d.status NOT IN ('Available', 'On Leave', 'Inactive')
        ORDER BY d.full_name`
     );
     res.json(result.rows);

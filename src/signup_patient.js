@@ -151,6 +151,41 @@ function generateSignUpHTML() {
       color: ${config.text_color}80;
       font-size: ${config.font_size}px;
     }
+        /* Modal styles for Terms and Privacy Policy */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(0, 0, 0, 0.5);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    .modal-content {
+      background: white;
+      padding: 2rem;
+      border-radius: 1rem;
+      max-width: 500px;
+      max-height: 80vh;
+      overflow-y: auto;
+      position: relative;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .modal-close {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      cursor: pointer;
+      color: #6b7280;
+      font-size: 1.5rem;
+      line-height: 1;
+    }
+    .modal-close:hover {
+      color: #1f2937;
+    }
   </style>
  </head>
  <body class="h-full bg-gradient-to-br from-sky-100 via-white to-sky-50">
@@ -270,8 +305,8 @@ function generateSignUpHTML() {
        <div class="flex items-start gap-3">
         <input type="checkbox" id="terms" name="terms" required class="mt-1 w-4 h-4 text-sky-400 border-gray-300 rounded focus:ring-sky-400 cursor-pointer">
         <label for="terms" id="terms-label" class="text-sm text-gray-600 cursor-pointer">
-         ${config.terms_text} <a href="#" class="text-sky-500 hover:text-sky-600 font-medium">Terms and Conditions</a> and <a href="#" class="text-sky-500 hover:text-sky-600 font-medium">Privacy Policy</a>
-        </label>
+         ${config.terms_text} <a href="javascript:void(0)" onclick="openModal('terms')" class="text-sky-500 hover:text-sky-600 font-medium">Terms and Conditions</a> and <a href="javascript:void(0)" onclick="openModal('privacy')" class="text-sky-500 hover:text-sky-600 font-medium">Privacy Policy</a>
+       </label>
        </div>
        
        <!-- Submit Button -->
@@ -391,6 +426,84 @@ function generateSignUpHTML() {
         submitBtn.textContent = '${config.button_text}';
       });
     });
+  </script>
+    <!-- Terms and Conditions Modal -->
+  <div id="terms-modal" class="modal-overlay">
+    <div class="modal-content">
+      <span class="modal-close" onclick="closeModal('terms')">&times;</span>
+      <h2 class="text-2xl font-bold mb-4">Terms and Conditions</h2>
+      <div class="space-y-4 text-gray-600">
+        <p>Welcome to our healthcare platform. By accessing or using our services, you agree to be bound by these terms:</p>
+        
+        <h3 class="font-semibold text-gray-800">1. Account Registration</h3>
+        <p>You must provide accurate and complete information when creating an account. You are responsible for maintaining the confidentiality of your account credentials.</p>
+        
+        <h3 class="font-semibold text-gray-800">2. Medical Information</h3>
+        <p>Any medical information you provide will be used for healthcare purposes only. We are not responsible for the accuracy of medical information provided by users.</p>
+        
+        <h3 class="font-semibold text-gray-800">3. Privacy</h3>
+        <p>Your use of our services is also governed by our Privacy Policy. Please review it to understand our practices.</p>
+        
+        <h3 class="font-semibold text-gray-800">4. User Conduct</h3>
+        <p>You agree to use the platform only for lawful purposes and in a way that does not infringe the rights of others.</p>
+        
+        <h3 class="font-semibold text-gray-800">5. Modifications</h3>
+        <p>We reserve the right to modify these terms at any time. Continued use of the platform constitutes acceptance of modified terms.</p>
+        
+        <p class="text-sm text-gray-500 mt-4">Last updated: January 2026</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Privacy Policy Modal -->
+  <div id="privacy-modal" class="modal-overlay">
+    <div class="modal-content">
+      <span class="modal-close" onclick="closeModal('privacy')">&times;</span>
+      <h2 class="text-2xl font-bold mb-4">Privacy Policy</h2>
+      <div class="space-y-4 text-gray-600">
+        <p>Your privacy is important to us. This policy explains how we collect, use, and protect your information:</p>
+        
+        <h3 class="font-semibold text-gray-800">1. Information We Collect</h3>
+        <p>We collect personal information you provide during registration including name, email, phone number, date of birth, and medical information such as blood type.</p>
+        
+        <h3 class="font-semibold text-gray-800">2. How We Use Information</h3>
+        <p>Information is used to provide healthcare services, communicate with you, and improve our platform. We never sell your personal data.</p>
+        
+        <h3 class="font-semibold text-gray-800">3. Data Security</h3>
+        <p>We implement security measures to protect your information. However, no method of transmission over the internet is 100% secure.</p>
+        
+        <h3 class="font-semibold text-gray-800">4. Sharing of Information</h3>
+        <p>We may share information with healthcare providers as necessary for your treatment. We do not share information with third parties for marketing purposes.</p>
+        
+        <h3 class="font-semibold text-gray-800">5. Your Rights</h3>
+        <p>You may access, correct, or delete your personal information by contacting us. You can also opt-out of non-essential communications.</p>
+        
+        <h3 class="font-semibold text-gray-800">6. Cookies</h3>
+        <p>We use cookies to enhance your experience. You can set your browser to refuse cookies, but some features may not function properly.</p>
+        
+        <p class="text-sm text-gray-500 mt-4">Last updated: January 2026</p>
+      </div>
+    </div>
+  </div>
+    <script>
+    // Modal functions for Terms and Privacy Policy
+    function openModal(type) {
+      document.getElementById(type + '-modal').style.display = 'flex';
+      document.body.style.overflow = 'hidden'; // Prevent scrolling
+    }
+    
+    function closeModal(type) {
+      document.getElementById(type + '-modal').style.display = 'none';
+      document.body.style.overflow = 'auto'; // Restore scrolling
+    }
+    
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+      if (event.target.classList.contains('modal-overlay')) {
+        event.target.style.display = 'none';
+        document.body.style.overflow = 'auto';
+      }
+    }
   </script>
  </body>
 </html>
