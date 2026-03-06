@@ -73,7 +73,7 @@ async function seedDatabase() {
         emergency_contact_phone, medical_conditions, allergies, last_visit, next_appointment
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
-        userId,patientUUID,patientData.name,patientData.dob,patientData.gender,patientData.blood_type,
+        userId,'PT-' + Date.now(),patientData.name,patientData.dob,patientData.gender,patientData.blood_type,
         patientData.phone,patientData.email,patientData.address,'','',[],[],null,null
       ]
     );

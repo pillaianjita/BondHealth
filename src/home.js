@@ -155,12 +155,18 @@ app.post('/api/auth/register', async (req, res) => {
     console.log('✅ User created:', user);
 
     // Insert patient profile (without emergency contact fields since they're not in the form)
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    const patient_uuid = `PT-${year}${month}${day}-${random}`
     await client.query(
       `INSERT INTO patients (
-        user_id, full_name, email, phone, address, date_of_birth, gender,blood_type
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+         user_id, patient_uuid, full_name, email, phone, address, date_of_birth, gender, blood_type
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
-        user.user_id, name, email, phone, address, dob, gender, blood_type
+        user.user_id,patient_uuid, name, email, phone, address, dob, gender, blood_type
       ]
     );
     console.log('✅ Patient profile created');
