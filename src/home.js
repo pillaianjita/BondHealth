@@ -1127,7 +1127,7 @@ app.get('/api/doctors', authenticate, async (req, res) => {
       `SELECT d.*, h.name as hospital_name 
        FROM doctors d
        JOIN hospitals h ON d.hospital_id = h.hospital_id
-       WHERE d.status NOT IN ('Available', 'On Leave', 'Inactive')
+       WHERE d.status NOT IN ('On Leave', 'Inactive')
        ORDER BY d.full_name`
     );
     res.json(result.rows);
