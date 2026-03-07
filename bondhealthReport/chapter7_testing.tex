@@ -1,9 +1,10 @@
 \chapter{Testing}
 
-\section{Introduction}
 Testing ensures the reliability, functionality, and quality of BondHealth across four user roles. Over 50 comprehensive test cases covered all major functionalities including authentication, patient management, doctor operations, admin functions, and lab workflows.
 
 \section{Testing Levels}
+
+This section describes the different levels of testing performed to validate BondHealth's functionality, from individual components to complete system workflows.
 
 \subsection{Unit Testing}
 Tested individual components in isolation:
@@ -36,6 +37,8 @@ Comprehensive testing across all requirements:
 \end{itemize}
 
 \section{Test Results Summary}
+
+This section presents the quantitative results of all test cases executed across different functional categories.
 
 \begin{table}[H]
     \centering
@@ -71,6 +74,8 @@ Comprehensive testing across all requirements:
 
 \section{Security Testing}
 
+This section outlines the security vulnerabilities tested and the measures implemented to protect the system from common attacks.
+
 Penetration testing identified and mitigated the following vulnerabilities:
 
 \begin{itemize}
@@ -84,6 +89,8 @@ Penetration testing identified and mitigated the following vulnerabilities:
 \end{itemize}
 
 \section{Usability Testing}
+
+This section summarizes feedback from real users across different roles and the improvements made based on their input.
 
 User feedback from 15 testers (6 patients, 4 doctors, 3 admins, 2 lab techs):
 
@@ -108,6 +115,8 @@ Improvements made based on feedback:
 
 \section{Bug Tracking and Resolution}
 
+This section details the bugs identified during testing, their severity levels, and the resolution status.
+
 \begin{table}[H]
     \centering
     \small
@@ -130,16 +139,11 @@ Improvements made based on feedback:
     \label{tab:bugs}
 \end{table}
 
-Common bugs resolved:
-\begin{itemize}
-    \item Date/time formatting inconsistencies across browsers
-    \item Image upload file size validation
-    \item Appointment rescheduling logic conflicts
-    \item Report PDF generation encoding issues
-    \item Review submission duplicate prevention
-\end{itemize}
+The most common bugs resolved during testing included date and time formatting inconsistencies across different browsers, which affected appointment display. Image upload functionality required additional file size validation to prevent server overload. Appointment rescheduling logic conflicts were identified and fixed to ensure proper time slot availability. Report PDF generation encountered encoding issues with special characters in patient names, which were resolved by implementing proper character encoding. Duplicate review submissions were prevented by adding client-side and server-side checks to ensure each patient could submit only one review per doctor.
 
 \section{Test Environment}
+
+This section describes the hardware, software, and tools used during the testing process.
 
 \begin{itemize}
     \item \textbf{Hardware}: Intel i7, 16GB RAM, 512GB SSD
@@ -149,6 +153,8 @@ Common bugs resolved:
 \end{itemize}
 
 \section{Coverage Summary}
+
+This section presents the test coverage percentages across different quality dimensions.
 
 \begin{table}[H]
     \centering
