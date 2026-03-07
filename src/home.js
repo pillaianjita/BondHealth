@@ -500,60 +500,6 @@ app.get('/api/reviews/filters', async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
-// ============================================
-// REPORTS API ROUTES - Add this right after the GET /api/reports route
-// ============================================
-
-// Upload a new report
-app.post('/api/reports', authenticate, authorize('patient'), async (req, res) => {
-  try {
-    const { test_type, test_date, notes } = req.body;
-    
-    // Validate input
-    if (!test_type || !test_date) {
-      return res.status(400).json({ error: 'Test type and date are required' });
-    }
-    
-    // Get patient_id from authenticated user
-    const patientResult = await query(
-      'SELECT patient_id FROM patients WHERE user_id = $1',
-      [req.user.id]
-    );
-    
-    if (patientResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Patient profile not found' });
-    }
-    
-    const patientId = patientResult.rows[0].patient_id;
-    
-    // Insert report (without file for now - you can add file upload later)
-    const result = await query(
-      `INSERT INTO lab_reports (
-        patient_id, 
-        test_type, 
-        test_date, 
-        results, 
-        findings, 
-        file_url, 
-        created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
-      RETURNING *`,
-      [
-        patientId, 
-        test_type, 
-        test_date, 
-        'Pending', // Default results
-        notes || 'No findings recorded', 
-        '/uploads/placeholder.pdf' // Placeholder file URL
-      ]
-    );
-    
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error uploading report:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
 
 //UPDATE LEAVE
 app.post('/api/doctors/:doctorId/leave', authenticate, authorize('admin'), async (req, res) => {
