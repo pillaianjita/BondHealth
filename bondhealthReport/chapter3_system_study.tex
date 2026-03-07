@@ -4,6 +4,8 @@ The system study phase involves understanding existing healthcare management cha
 
 \section{Existing System}
 
+This section examines the current healthcare management landscape, identifying key operational inefficiencies and limitations in existing systems that BondHealth aims to address.
+
 \subsection{Current Healthcare Challenges}
 \begin{itemize}
     \item \textbf{Fragmented Medical Records:} Patient data scattered across different healthcare facilities with no central access.
@@ -22,6 +24,8 @@ The system study phase involves understanding existing healthcare management cha
 \end{itemize}
 
 \section{Proposed System}
+
+This section outlines BondHealth's comprehensive solution to healthcare management challenges, describing its core features and the transformative benefits it offers to all stakeholders.
 
 \subsection{System Overview}
 BondHealth is a web-based healthcare management platform connecting patients, doctors, hospitals, and laboratories on a unified system. The platform provides:
@@ -43,6 +47,8 @@ BondHealth is a web-based healthcare management platform connecting patients, do
 
 \section{Feasibility Study}
 
+This section evaluates BondHealth's viability across technical, operational, and economic dimensions to ensure the proposed solution is practical and sustainable.
+
 \subsection{Technical Feasibility}
 Uses proven technologies: Node.js/Express for backend, PostgreSQL for database, JWT for authentication, and responsive design for all devices.
 
@@ -54,49 +60,23 @@ Reduces administrative costs, eliminates paper-based systems, improves staff pro
 
 \section{Requirements Analysis}
 
+This section details the functional and non-functional requirements that guide BondHealth's development, ensuring the system meets all stakeholder needs effectively.
+
 \subsection{Functional Requirements}
 
-\subsubsection{Patient Module}
 \begin{itemize}
-    \item Registration, profile management, appointment booking
-    \item Access medical reports, prescriptions, and write reviews
-\end{itemize}
-
-\subsubsection{Doctor Module}
-\begin{itemize}
-    \item View appointments, access patient history, review lab reports
-    \item Manage availability and leave requests
-\end{itemize}
-
-\subsubsection{Hospital Admin Module}
-\begin{itemize}
-    \item Register doctors, manage medicine inventory, add labs
-    \item View statistics and manage doctor leave schedules
-\end{itemize}
-
-\subsubsection{Lab Technician Module}
-\begin{itemize}
-    \item Upload reports, update status, share results with doctors/patients
+    \item \textbf{Patient Module:} Registration, profile management, appointment booking, access to medical reports, prescriptions, and ability to write reviews.
+    \item \textbf{Doctor Module:} View appointments, access patient history, review lab reports, manage availability and leave requests.
+    \item \textbf{Hospital Admin Module:} Register doctors, manage medicine inventory, add labs, view statistics and manage doctor leave schedules.
+    \item \textbf{Lab Technician Module:} Upload reports, update status, share results with doctors and patients.
 \end{itemize}
 
 \subsection{Non-Functional Requirements}
 
-\subsubsection{Performance Requirements}
 \begin{itemize}
-    \item Page load < 3 seconds, handle 1000+ concurrent users
-    \item API response < 200ms for standard operations
-\end{itemize}
-
-\subsubsection{Security Requirements}
-\begin{itemize}
-    \item Passwords hashed with bcrypt, JWT tokens with 7-day expiration
-    \item Role-based access control and secure HttpOnly cookies
-\end{itemize}
-
-\subsubsection{Usability \& Reliability Requirements}
-\begin{itemize}
-    \item Intuitive interface with responsive design
-    \item 99.9\% uptime, data backup, transaction integrity
+    \item \textbf{Performance Requirements:} Page load under 3 seconds, handle 1000+ concurrent users, API response under 200ms for standard operations.
+    \item \textbf{Security Requirements:} Passwords hashed with bcrypt, JWT tokens with 7-day expiration, role-based access control and secure HttpOnly cookies.
+    \item \textbf{Usability \& Reliability Requirements:} Intuitive interface with responsive design, 99.9\% uptime, data backup, transaction integrity.
 \end{itemize}
 
 \section{System Architecture Overview}
@@ -120,17 +100,14 @@ The BondHealth system follows a three-tier architecture with client, application
 
 \section{System Modules}
 
-\subsection{Authentication Module}
-Handles JWT-based registration, login, session management, and role-based access control.
+This section describes the core functional modules that constitute BondHealth, explaining their roles and interactions within the overall system architecture.
 
-\subsection{Patient Management Module}
-Manages profiles, medical history, appointments, and report access.
-
-\subsection{Appointment Management Module}
-Handles real-time availability checking, booking, rescheduling, and cancellation.
-
-\subsection{Reporting Module}
-Manages lab report uploads, status tracking, and secure sharing between stakeholders.
+\begin{itemize}
+    \item \textbf{Authentication Module:} Handles JWT-based registration, login, session management, and role-based access control.
+    \item \textbf{Patient Management Module:} Manages profiles, medical history, appointments, and report access.
+    \item \textbf{Appointment Management Module:} Handles real-time availability checking, booking, rescheduling, and cancellation.
+    \item \textbf{Reporting Module:} Manages lab report uploads, status tracking, and secure sharing between stakeholders.
+\end{itemize}
 
 \section{User Roles and Permissions}
 
