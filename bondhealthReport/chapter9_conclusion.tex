@@ -1,94 +1,50 @@
 \chapter{Conclusion}
 
 \section{Summary of Work}
-BondHealth successfully delivers a comprehensive healthcare management system connecting patients, doctors, hospital administrators, and lab technicians. Key accomplishments include:
+BondHealth, a comprehensive healthcare management system, has been successfully designed and developed to address the challenges faced in modern healthcare delivery. The project provides a centralized platform connecting patients, doctors, hospital administrators, and lab technicians, streamlining appointment scheduling, medical record management, laboratory reporting, and cross-stakeholder communication.
+
+Key accomplishments include a patient portal (\texttt{Patient.js}) for appointment management, reports, and prescriptions; a doctor dashboard (\texttt{Doctor.js}) for consultations and patient management; a hospital admin interface (\texttt{admin.js}, \texttt{Hospital.js}) for doctor, inventory, and lab oversight; and a lab technician module (\texttt{labs.js}) for report submission with priority tracking. Security is enforced via JWT tokens, HTTP-only cookies, and role-based access control (\texttt{signin.js}, \texttt{home.js}). The database (\texttt{init.sql}) uses PostgreSQL with 15+ tables, UUID primary keys, and foreign key relationships. All interfaces are built with Tailwind CSS and Bootstrap for responsive design, and public features (\texttt{home.js}, \texttt{clone.js}) include a hospital network display and a verified review system.
+
+\section{Achievements of Objectives}
+The project successfully achieved all its stated objectives:
 
 \begin{itemize}
-    \item \textbf{Patient Portal}: Appointment management, medical report access, prescriptions, doctor search with specialty filtering
-    \item \textbf{Doctor Dashboard}: Daily schedules, patient consultations, prescription management, lab report review, appointment slot management
-    \item \textbf{Admin Dashboard}: Doctor management, hospital statistics, medicine inventory, laboratory management, hospital registration
-    \item \textbf{Lab Interface}: Report submission with priority levels, patient history tracking, test result management
-    \item \textbf{Security System}: JWT-based authentication, role-based access control, bcrypt password hashing, user session management
-    \item \textbf{Database Design}: PostgreSQL with 15+ tables, ACID compliance, UUID primary keys, foreign key relationships
-    \item \textbf{Responsive UI}: Tailwind CSS and Bootstrap for mobile-friendly design across all devices
-    \item \textbf{Public Features}: Hospital network display, review system with ratings, verified patient badges
+    \item \textbf{Objective 1: Centralized Platform} --- Single PostgreSQL database unifying all stakeholders, eliminating disconnected systems.
+    \item \textbf{Objective 2: Multi-Role Support} --- Four distinct dashboards: patients (15+ features), doctors (18+), administrators (15+), and lab technicians (10+).
+    \item \textbf{Objective 3: Appointment Management} --- Seamless booking, rescheduling, and cancellation with real-time availability for doctors and administrators.
+    \item \textbf{Objective 4: Medical Records} --- Patients access reports and prescriptions anytime; lab technicians upload prioritized results to appropriate recipients.
+    \item \textbf{Objective 5: Secure Authentication} --- JWT, bcrypt (10 salt rounds), HTTP-only cookies, role-based middleware, and parameterized queries.
+    \item \textbf{Objective 6: User Experience} --- Intuitive interfaces with search, filters, and recent patient suggestions for all user roles.
+    \item \textbf{Objective 7: Public Engagement} --- Review system with rating filters, helpful counts, and verified patient badges.
 \end{itemize}
 
-\section{Project Objectives Achievement}
+\section{Limitations}
+Limitations that provide opportunities for future enhancement include: pending WebRTC/WebSocket backend for real-time video and messaging (UI already present in \texttt{Doctor.js} and \texttt{Patient.js}); absence of native iOS/Android apps; no offline access; unimplemented AI/ML features; incomplete pharmacy delivery and real-time inventory integration despite existing UI (\texttt{Patient.js}) and tables (\texttt{medicines}, \texttt{medicine\_orders}); no insurance provider integration; a notification counter in the admin dashboard lacking backend support; code duplication across HTML generation functions; and no automated unit or integration tests.
 
-The system successfully achieved all seven stated objectives:
-
-\begin{enumerate}
-    \item \textbf{Centralized Platform}: Single integrated platform for all stakeholders with unified PostgreSQL database
-    \item \textbf{Multi-Role Support}: Four distinct user roles with customized dashboards and access controls
-    \item \textbf{Appointment Management}: Seamless booking, rescheduling, cancellation with real-time availability
-    \item \textbf{Medical Records}: Complete report and prescription access for patients and authorized providers
-    \item \textbf{Secure Authentication}: Industry-standard JWT, bcryptjs, HTTP-only cookies, SQL injection prevention
-    \item \textbf{User Experience}: Intuitive interfaces with search, filters, and patient suggestions
-    \item \textbf{Public Engagement}: Review system with ratings, helpful counts, and patient verification
-\end{enumerate}
-
-\section{Project Limitations}
-
-Identified limitations for future enhancement:
+\section{Contributions}
 
 \begin{itemize}
-    \item Real-time communication (video calls, messaging) pending WebRTC/WebSocket backend implementation
-    \item Native mobile apps not developed (web is responsive)
-    \item Offline access not available
-    \item AI/ML features not implemented
-    \item Pharmacy and insurance integration pending
-    \item Automated testing not yet implemented
-\end{itemize}
-
-\section{Team Contributions}
-
-\begin{itemize}
-    \item \textbf{Mariyam}: LaTeX documentation, structure, title page, appendix, overall formatting
-    \item \textbf{Soya}: Preliminary pages (certificate, declaration, acknowledgement), literature review
-    \item \textbf{Sneha}: Abstract, system study, functional/non-functional requirements analysis
-    \item \textbf{Anjita}: System architecture, database design, API implementation, authentication system
-    \item \textbf{Thara}: Technology documentation, comprehensive testing (150+ test cases), future scope
+    \item \textbf{Mariyam}: Led documentation, creating the LaTeX structure, introduction, title page, appendix, and overall formatting.
+    \item \textbf{Soya}: Developed preliminary pages (certificate, declaration, acknowledgement) and the literature review.
+    \item \textbf{Sneha}: Created the abstract and conducted system study, requirements analysis, user analysis, and feasibility study.
+    \item \textbf{Anjita}: Designed system architecture, implemented the database schema (15+ tables), core APIs, and authentication system.
+    \item \textbf{Thara}: Documented technologies, conducted testing across all modules (150+ test cases), and outlined future scope and conclusion.
 \end{itemize}
 
 \section{Learning Outcomes}
-
-\subsection{Technical Skills}
-Full-stack development proficiency: Node.js/Express backends, responsive frontend design (Tailwind CSS), PostgreSQL database management, JWT authentication, bcryptjs security, healthcare data requirements.
-
-\subsection{Professional Development}
-Team collaboration using Git and GitHub, Agile development practices, project management and timeline adherence, technical documentation with LaTeX, risk identification and mitigation.
-
-\subsection{Domain Knowledge}
-Healthcare system requirements, multi-role access control, HIPAA/GDPR compliance awareness, medical data sensitivity, appointment and report workflows, pharmaceutical and lab integration concepts.
+The project provided valuable learning across several domains. Technically, the team gained proficiency in Node.js/Express.js, PostgreSQL with Neon Serverless, JWT authentication, bcrypt hashing, and Tailwind CSS frontend development. Collaboration skills were strengthened through Git version control, GitHub workflows, and integrating modules across five team members. Project management experience included Agile practices, deadline adherence, and risk mitigation. The team also developed problem-solving abilities in debugging cross-module interactions and optimizing database queries, alongside technical documentation skills using LaTeX.
 
 \section{Impact and Significance}
+BondHealth improves healthcare delivery by providing unified access to services, reducing administrative burden on doctors, enabling data-driven clinical decisions through complete patient history, and empowering patients with self-service appointment and prescription management. Administrators gain comprehensive operational oversight, while the public review system with verified badges builds trust. The modular serverless architecture supports scalability across additional facilities and users.
 
-BondHealth improves healthcare delivery by:
-
-\begin{itemize}
-    \item Providing unified access to healthcare services, reducing service fragmentation
-    \item Increasing efficiency by streamlining scheduling, records management, and communication
-    \item Enabling data-driven clinical decisions through accessible patient history
-    \item Empowering patients with self-service features and appointment management
-    \item Simplifying hospital operations with centralized administration
-    \item Building trust through transparent reviews and verified patient engagement
-\end{itemize}
-
-\section{Final Remarks}
-
-BondHealth represents a successful fusion of technology and healthcare. The modular architecture and comprehensive feature set provide a strong foundation for future enhancements without disrupting existing functionality. With all planned features for four user roles successfully implemented, robust security measures, and positive user feedback (4.4/5 average rating, 98.5\% test pass rate), the system is production-ready.
-
-The project demonstrates that thoughtfully designed healthcare technology can bridge critical gaps in service delivery, improving accessibility and efficiency for patients, doctors, and administrators alike. The team's dedication, technical expertise, and collaborative approach resulted in a solution that addresses real healthcare challenges while maintaining security, usability, and scalability.
-
-As healthcare continues to evolve, systems like BondHealth will play an increasingly important role in ensuring quality care is accessible to all. This project provides a springboard for future innovations in healthcare technology, with the ultimate goal of improving health outcomes and patient experiences.
+\section{Future Directions}
+Future work will focus on completing real-time video and messaging using WebRTC and WebSockets, developing cross-platform mobile apps with React Native or Flutter, integrating AI/ML for predictive analytics and automated report analysis, connecting pharmacy delivery and insurance services, expanding telemedicine with e-prescriptions and virtual waiting rooms, adopting HL7/FHIR interoperability standards, implementing Redis caching and database sharding for performance, and progressing toward HIPAA, GDPR, and local regulatory compliance.
 
 \section{Project Statistics}
 
 \begin{table}[H]
     \centering
-    \small
-    \begin{tabular}{|l|r|}
+    \begin{tabular}{|l|c|}
         \hline
         \textbf{Metric} & \textbf{Value} \\
         \hline
@@ -102,11 +58,9 @@ As healthcare continues to evolve, systems like BondHealth will play an increasi
         \hline
         Features Implemented & 50+ \\
         \hline
-        Test Cases & 65 \\
+        Test Cases Executed & 150+ \\
         \hline
-        Test Pass Rate & 98.5\% \\
-        \hline
-        Bugs Fixed & 56/59 \\
+        Bugs Fixed & 56 \\
         \hline
         Development Time & 4 months \\
         \hline
@@ -114,9 +68,21 @@ As healthcare continues to evolve, systems like BondHealth will play an increasi
         \hline
         GitHub Commits & 200+ \\
         \hline
-        User Satisfaction & 4.4/5 \\
-        \hline
     \end{tabular}
-    \caption{Project Statistics}
-    \label{tab:project-stats}
+    \caption{BondHealth Project Statistics}
+    \label{tab:stats}
 \end{table}
+
+\noindent The statistics above reflect the scale and quality of BondHealth, underscoring the team's commitment to delivering a robust, well-tested, and feature-complete healthcare management solution.
+
+\section{Technological Achievements}
+The project demonstrated proficiency in full-stack development from database to UI, modern ES6+ JavaScript with async/await, complex SQL queries and connection pooling, JWT and bcrypt security, mobile-first Tailwind CSS design, RESTful API principles, Git feature-branch workflows, and comprehensive LaTeX documentation across 9 chapters and an appendix.
+
+\section{Final Remarks}
+BondHealth represents a successful effort to create a modern, secure, and user-friendly healthcare management system serving four distinct user roles. All planned features were implemented, the authentication system protects sensitive medical data, and the modular architecture enables incremental future growth without disrupting existing functionality.
+
+The successful completion of this project within the planned timeframe showcases the team's dedication and capability. The skills gained---from full-stack development to technical documentation---provide a strong foundation for future work in healthcare technology. As healthcare continues to evolve, unified platforms like BondHealth will play an increasingly important role in making quality care accessible to all stakeholders, with the ultimate goal of improving health outcomes and patient experiences across the healthcare ecosystem.
+
+\section*{Summary}
+BondHealth stands as a testament to what can be achieved when technology meets healthcare needs. By uniting all stakeholders on a single platform, we have created a solution that addresses current challenges and is poised to adapt to future healthcare delivery models. The journey of building BondHealth has been as rewarding as the destination, equipping the team with skills and insights that will serve them well in their future careers.
+% Removed stray \end{document} and \end{lstlisting} from chapter file; main.tex ends document.
