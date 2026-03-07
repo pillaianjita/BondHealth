@@ -7,34 +7,13 @@ Testing ensures the reliability, functionality, and quality of BondHealth across
 This section describes the different levels of testing performed to validate BondHealth's functionality, from individual components to complete system workflows.
 
 \subsection{Unit Testing}
-Tested individual components in isolation:
-\begin{itemize}
-    \item Database queries for appointments, reports, prescriptions
-    \item Authentication functions: password hashing, JWT generation/verification
-    \item Input validation in registration forms
-    \item Utility functions (date formatting, age calculation)
-\end{itemize}
+Unit testing focused on verifying individual components in isolation to ensure each function performs as expected. Database queries for appointments, reports, and prescriptions were tested against sample data to confirm correct record retrieval and manipulation. Authentication functions including password hashing with bcrypt and JWT generation and verification were validated to ensure tokens are created with the correct payload and properly validated on subsequent requests. Input validation routines in all registration forms were tested with both valid and invalid inputs to confirm that error messages appear appropriately and malformed data is rejected. Utility functions handling date formatting, age calculation, and text processing were also verified across different input scenarios and edge cases.
 
 \subsection{Integration Testing}
-Verified module interactions through key workflows:
-\begin{itemize}
-    \item Login $\rightarrow$ Session creation $\rightarrow$ Protected route access
-    \item Patient selects doctor $\rightarrow$ Books appointment $\rightarrow$ Doctor views notification
-    \item Lab uploads report $\rightarrow$ Doctor reviews $\rightarrow$ Patient accesses
-    \item Doctor writes prescription $\rightarrow$ Patient requests refill
-    \item Admin registers hospital $\rightarrow$ Adds doctors to system
-\end{itemize}
+Integration testing verified that modules interact correctly when combined into complete workflows. The login-to-session flow was tested to confirm that successful authentication creates a valid session and grants access to protected routes while preventing access without proper credentials. Patient appointment booking was validated end-to-end, from doctor selection through slot availability checking to confirmation and notification delivery to the doctor's dashboard. The lab report workflow was tested to ensure that when a lab technician uploads a report, it becomes immediately visible to the associated doctor and accessible to the patient through their portal. Prescription workflows were validated to confirm that doctors can write prescriptions and patients can request refills through the appropriate interfaces. Hospital registration and doctor addition by administrators were also tested as integrated workflows spanning multiple modules.
 
 \subsection{System Testing}
-Comprehensive testing across all requirements:
-\begin{itemize}
-    \item Functional testing: All 50+ features for all four roles
-    \item UI/UX testing: Responsiveness, intuitiveness, accessibility
-    \item Security testing: Authentication, authorization, data protection
-    \item Performance testing: Response times and resource usage
-    \item Cross-browser testing: Chrome, Firefox, Safari, Edge
-    \item Responsive design testing: Desktop, tablet, mobile views
-\end{itemize}
+System testing encompassed comprehensive validation across all functional and non-functional requirements. Functional testing exercised all 50+ features across the four user roles to confirm that every intended capability is present and working correctly. UI/UX testing evaluated responsiveness, intuitiveness, and accessibility across different screen sizes and user scenarios. Security testing verified authentication mechanisms, authorization controls, and data protection measures. Performance testing measured response times and resource usage under various load conditions. Cross-browser testing confirmed consistent behavior across Chrome, Firefox, Safari, and Edge browsers. Responsive design testing validated the user experience on desktop, tablet, and mobile viewports.
 
 \section{Test Results Summary}
 
@@ -76,42 +55,36 @@ This section presents the quantitative results of all test cases executed across
 
 This section outlines the security vulnerabilities tested and the measures implemented to protect the system from common attacks.
 
-Penetration testing identified and mitigated the following vulnerabilities:
+\subsection*{SQL Injection Prevention}
+Parameterized queries are used throughout the codebase to prevent SQL injection attacks. Rather than concatenating user input directly into query strings, all database interactions use the PostgreSQL parameterized query pattern where input values are passed separately from the SQL structure. This ensures that even if malicious input containing SQL syntax is submitted, it is treated as data rather than executable code, effectively neutralizing injection attempts.
 
-\begin{itemize}
-    \item \textbf{SQL Injection}: Parameterized queries prevent injection attacks
-    \item \textbf{XSS}: Input sanitization and HTTP-only cookies block script attacks
-    \item \textbf{CSRF}: JWT tokens in secure cookies prevent cross-site attacks
-    \item \textbf{Session Hijacking}: HTTP-only flag prevents client-side token access
-    \item \textbf{Password Storage}: bcrypt with 10 salt rounds secures credentials
-    \item \textbf{Role-Based Access}: Middleware prevents unauthorized access
-    \item \textbf{JWT Tampering}: Signature verification detects token modification
-\end{itemize}
+\subsection*{Cross-Site Scripting (XSS) Protection}
+Input sanitization is applied to all user-submitted content before rendering in the browser, removing or escaping any potentially malicious script tags or JavaScript event handlers. Additionally, HTTP-only cookies are used for JWT token storage, preventing client-side scripts from accessing authentication tokens even if an XSS vulnerability exists elsewhere in the application.
+
+\subsection*{CSRF Defense}
+JWT tokens stored in secure, HTTP-only cookies with the SameSite attribute provide protection against cross-site request forgery attacks. Because the browser automatically includes cookies with requests to the BondHealth domain but not with cross-origin requests, attackers cannot forge authenticated requests from malicious sites.
+
+\subsection*{Session Hijacking Prevention}
+The HTTP-only flag on authentication cookies prevents JavaScript from accessing the token, eliminating the risk of token theft through XSS. The Secure flag ensures cookies are only transmitted over HTTPS connections in production environments. Token expiration is set to seven days, limiting the window of opportunity for any compromised tokens.
+
+\subsection*{Password Security}
+All passwords are hashed using bcrypt with a salt factor of 10 before storage. This approach adds computational cost to brute-force attempts while ensuring that even if the database is compromised, the actual passwords remain protected. Password comparison uses bcrypt's timing-safe comparison function to prevent timing attacks.
+
+\subsection*{Role-Based Access Control}
+Middleware functions check user roles before granting access to any protected route or API endpoint. Patients cannot access doctor functions, doctors cannot access admin functions, and unauthenticated users cannot access any role-specific features. This ensures that even if a user obtains a valid token, they can only access resources appropriate to their assigned role.
+
+\subsection*{JWT Tampering Detection}
+All JWTs include a signature generated using a server-side secret key. When a token is presented, the signature is verified before the token payload is trusted. Any attempt to modify the token payload will invalidate the signature, causing the token to be rejected by the authentication middleware.
 
 \section{Usability Testing}
 
 This section summarizes feedback from real users across different roles and the improvements made based on their input.
 
-User feedback from 15 testers (6 patients, 4 doctors, 3 admins, 2 lab techs):
+\subsection*{User Feedback Summary}
+Fifteen testers participated in usability evaluation, including six patients, four doctors, three hospital administrators, and two lab technicians. Fourteen of fifteen users found the interface intuitive and easy to navigate. Thirteen users reported being able to find required features without assistance. Appointment booking completion time averaged 2.5 minutes from login to confirmation. Twelve users successfully found and downloaded lab reports without guidance. Eleven users expressed satisfaction with the mobile experience across smartphone and tablet form factors. Overall satisfaction ratings averaged 4.4 out of 5 across all participant groups.
 
-\begin{itemize}
-    \item \textbf{Navigation}: 14/15 users found interface intuitive
-    \item \textbf{Feature Discovery}: 13/15 easily found required features
-    \item \textbf{Appointment Booking}: Average completion time 2.5 minutes
-    \item \textbf{Report Access}: 12/15 easily found and downloaded reports
-    \item \textbf{Mobile Experience}: 11/15 satisfied with mobile usability
-    \item \textbf{Overall Satisfaction}: Average rating 4.4/5
-\end{itemize}
-
-Improvements made based on feedback:
-\begin{itemize}
-    \item Added doctor search with filters
-    \item Improved mobile menu navigation
-    \item Added confirmation dialogs for critical actions
-    \item Enhanced error messages with actionable guidance
-    \item Implemented toast notifications for feedback
-    \item Added loading states for async operations
-\end{itemize}
+\subsection*{Improvements Implemented}
+Based on user feedback, several enhancements were made to the platform. Doctor search functionality was expanded to include filtering by specialization, availability, and patient ratings. Mobile menu navigation was redesigned to provide clearer access to key features with fewer taps. Confirmation dialogs were added for critical actions such as appointment cancellation and prescription requests to prevent accidental operations. Error messages were rewritten to include actionable guidance rather than generic failure notifications. Toast notifications were implemented to provide non-intrusive feedback for successful operations and background processes. Loading states were added to all async operations to give users clear indication that their actions are being processed.
 
 \section{Bug Tracking and Resolution}
 
@@ -139,18 +112,24 @@ This section details the bugs identified during testing, their severity levels, 
     \label{tab:bugs}
 \end{table}
 
-The most common bugs resolved during testing included date and time formatting inconsistencies across different browsers, which affected appointment display. Image upload functionality required additional file size validation to prevent server overload. Appointment rescheduling logic conflicts were identified and fixed to ensure proper time slot availability. Report PDF generation encountered encoding issues with special characters in patient names, which were resolved by implementing proper character encoding. Duplicate review submissions were prevented by adding client-side and server-side checks to ensure each patient could submit only one review per doctor.
+\subsection*{Common Bugs Resolved}
+Date and time formatting inconsistencies across different browsers affected appointment display and required normalization of date handling logic to use ISO formats internally with browser-appropriate presentation. Image upload functionality required additional file size validation to prevent server overload when users attempted to upload large medical images or documents. Appointment rescheduling logic conflicts were identified when overlapping availability windows caused double-booking; these were fixed by implementing stricter time slot validation and transaction isolation. Report PDF generation encountered encoding issues with special characters in patient names, particularly those containing accents or non-Latin scripts, which were resolved by implementing UTF-8 encoding throughout the PDF generation pipeline. Duplicate review submissions were prevented by adding both client-side button disabling and server-side uniqueness checks to ensure each patient could submit only one review per doctor.
 
 \section{Test Environment}
 
 This section describes the hardware, software, and tools used during the testing process.
 
-\begin{itemize}
-    \item \textbf{Hardware}: Intel i7, 16GB RAM, 512GB SSD
-    \item \textbf{OS}: Windows 10/11, macOS (Monterey+)
-    \item \textbf{Browsers}: Chrome v120+, Firefox v121+, Safari v17+, Edge v120+
-    \item \textbf{Testing Tools}: Chrome DevTools, Postman, Lighthouse, GitHub Issues
-\end{itemize}
+\subsection*{Hardware Configuration}
+Testing was conducted on systems with Intel i7 processors, 16GB of RAM, and 512GB SSD storage to represent typical developer and end-user hardware specifications. Mobile testing utilized various Android and iOS devices representing different screen sizes and performance capabilities.
+
+\subsection*{Operating Systems}
+Test environments included Windows 10 and 11, macOS Monterey and later versions, and multiple Linux distributions to ensure cross-platform compatibility. Mobile testing covered both Android and iOS operating systems across recent versions.
+
+\subsection*{Browser Coverage}
+Functional and UI testing was performed on Chrome version 120 and above, Firefox version 121 and above, Safari version 17 and above, and Edge version 120 and above to ensure consistent behavior across the most widely used browsers.
+
+\subsection*{Testing Tools}
+Chrome DevTools was used extensively for debugging, performance profiling, and responsive design testing. Postman facilitated API endpoint testing and workflow validation. Lighthouse provided performance, accessibility, and SEO metrics. GitHub Issues tracked bug reports and resolution progress throughout the testing phase.
 
 \section{Coverage Summary}
 

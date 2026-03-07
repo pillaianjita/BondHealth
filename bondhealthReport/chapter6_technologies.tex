@@ -30,93 +30,76 @@ BondHealth leverages modern web technologies to create a robust, scalable, and u
 
 This section describes the frontend technologies used to create BondHealth's responsive and intuitive user interfaces across all dashboards.
 
-\begin{itemize}
-    \item \textbf{HTML5:} Provides semantic structure with elements like \texttt{<header>}, \texttt{<nav>}, and \texttt{<section>}. Includes built-in form validation, local storage for session persistence, and file upload capabilities for medical reports.
-    
-    \item \textbf{Tailwind CSS:} A utility-first CSS framework used extensively across all dashboards (Patient.js, Doctor.js, admin.js). Enables rapid UI development with pre-built classes for responsive design, custom theming with cyan-bg and cyan-text classes, and built-in animations for smooth interactions.
-    
-    \item \textbf{Bootstrap 5:} Employed in hospital management pages (Hospital.js and HospitalRegistration.js) for rapid form development, providing styled form controls, responsive grid layouts, and modal components.
-    
-    \item \textbf{Font Awesome:} Provides over 6400 scalable vector icons used throughout the application for navigation menu items, action buttons, status indicators, profile avatars, and medical symbols.
-\end{itemize}
+\subsection*{HTML5}
+HTML5 provides semantic structure using elements like \texttt{<header>}, \texttt{<nav>}, and \texttt{<section>}. Built-in form validation attributes ensure data quality at entry, while local storage enables client-side session persistence. File upload functionality supports submission of medical reports and registration documents directly through the browser.
+
+\subsection*{Tailwind CSS}
+Tailwind CSS serves as the primary styling framework across all dashboards, following a utility-first approach that accelerates UI development. Responsive design is achieved through built-in breakpoints that adapt layouts across mobile, tablet, and desktop viewports. Custom theming created a consistent brand identity with specialized color classes such as cyan-bg and cyan-text appearing throughout the application.
+
+\subsection*{Bootstrap 5}
+Bootstrap 5 is employed specifically in hospital management pages to accelerate form development. Form controls with built-in validation states provide a professional appearance, while the responsive grid system enables complex multi-column registration forms to reorganize appropriately on smaller screens.
+
+\subsection*{Font Awesome}
+Font Awesome contributes over 6400 scalable vector icons that enhance the user interface. Navigation menu items use icons for visual cues, action buttons incorporate edit, delete, and download icons, and status indicators leverage check circles and warning triangles. Profile avatars employ role-appropriate icons for doctors, patients, hospitals, and lab technicians.
 
 \section{Backend Technologies}
 
 This section covers the server-side technologies that power BondHealth's business logic, API endpoints, and data processing capabilities.
 
 \subsection{Node.js and Express.js}
-Node.js v18.17.0 (LTS) powers the application server on port 3005 using an event-driven, non-blocking I/O model. Express.js v4.18.2 provides the core framework with routing, middleware, and error handling for over 30 API endpoints across all dashboards. Key features include async/await for database operations, modular architecture with separate files for each user role, and file system module for serving HTML templates.
+Node.js v18.17.0 powers the application server on port 3005 using an event-driven, non-blocking I/O model that efficiently handles multiple concurrent connections. Express.js v4.18.2 provides routing for over 30 API endpoints, middleware for authentication and logging, and centralized error handling. Key features include async/await for database operations and modular architecture with separate files for each user role.
 
 \subsection{PostgreSQL and Neon Serverless}
-PostgreSQL v15 serves as the relational database with over 15 tables maintaining ACID compliance and data integrity. Neon serverless platform enables automatic scaling and connection pooling without infrastructure management. The database schema includes tables for users, patients, doctors, appointments, lab reports, prescriptions, and medicines, with foreign key relationships ensuring data consistency and UUID primary keys for enhanced security.
+PostgreSQL v15 serves as the relational database with over 15 tables maintaining ACID compliance through foreign key relationships. The schema includes tables for users, patients, doctors, appointments, lab reports, prescriptions, and medicines, with UUID primary keys for enhanced security. Neon serverless platform enables automatic scaling and connection pooling without infrastructure management.
 
 \section{Authentication \& Security}
 
 This section details the security technologies and implementations that protect patient data and ensure proper access control.
 
 \subsection{JWT and bcryptjs}
-JSON Web Tokens (jsonwebtoken v9.0.3) handle stateless authentication with 7-day expiration, storing user role information for role-based access control. bcryptjs v3.0.3 provides password hashing with 10 salt rounds, protecting against rainbow table attacks.
+JSON Web Tokens handle stateless authentication with 7-day expiration, storing user role information within the token payload for role-based access control. bcryptjs provides password hashing with 10 salt rounds, resisting brute-force and rainbow table attacks while maintaining acceptable performance.
 
 \subsection{Security Implementation}
-BondHealth implements multiple layers of security to protect sensitive healthcare data. Role-based access control (RBAC) middleware ensures that users can only access features appropriate for their role—whether patient, doctor, admin, or lab technician. All JWT tokens are stored in HTTP-only cookies to prevent XSS attacks, while parameterized queries throughout the codebase prevent SQL injection vulnerabilities. Input validation and sanitization are performed on both client and server sides to ensure data integrity. SSL encryption secures all database connections, and environment variables keep sensitive configuration information like database URLs and JWT secrets out of the source code.
+Role-based access control middleware ensures users can only access features appropriate for their role. JWT tokens are stored in HTTP-only cookies, preventing XSS attacks. Parameterized queries prevent SQL injection by separating SQL structure from user-supplied data. Input validation on both client and server sides ensures data integrity. SSL encryption secures database connections, and environment variables keep sensitive configuration out of the codebase.
 
 \section{Development Tools}
 
 This section describes the tools and utilities used during BondHealth's development lifecycle.
 
-\begin{itemize}
-    \item \textbf{Visual Studio Code:} Primary IDE with extensions for LaTeX Workshop (documentation), Prettier (code formatting), ESLint (linting), GitLens (version control), Tailwind CSS IntelliSense, and Thunder Client (API testing).
-    
-    \item \textbf{Git and GitHub:} Version control system enabling collaborative development with feature branches, pull requests for code review, issues for task tracking, and GitHub Actions for continuous integration.
-    
-    \item \textbf{NPM (Node Package Manager):} Manages project dependencies including production packages (express, pg, jsonwebtoken, bcryptjs, cookie-parser, dotenv) and development packages (nodemon for auto-reload, concurrently for parallel process execution).
-\end{itemize}
+\subsection*{Visual Studio Code}
+VS Code serves as the primary IDE with extensions for LaTeX Workshop (documentation), Prettier (code formatting), ESLint (linting), GitLens (version control), and Thunder Client (API testing).
+
+\subsection*{Git and GitHub}
+Git and GitHub provide version control infrastructure with feature branching for parallel development, pull requests for code review, issues for task tracking, and GitHub Actions for continuous integration.
+
+\subsection*{NPM}
+NPM manages project dependencies including express, pg, jsonwebtoken, bcryptjs, and development tools like nodemon for auto-reloading during development.
 
 \section{Project Structure}
 
 This section outlines the modular architecture of BondHealth, showing the organization of source code and configuration files.
 
-\begin{itemize}
-    \item \textbf{src/} - Main source code directory
-    \begin{itemize}
-        \item \textbf{db/} - Database configuration files
-        \begin{itemize}
-            \item \texttt{config.js} - Database connection
-            \item \texttt{init.js} - Database initialization
-            \item \texttt{init.sql} - SQL schema (15+ tables)
-            \item \texttt{seed.js} - Seed data
-            \item \texttt{seed-reviews.js} - Review data seeding
-        \end{itemize}
-        \item \texttt{Patient.js} - Patient dashboard module
-        \item \texttt{Doctor.js} - Doctor dashboard module
-        \item \texttt{admin.js} - Admin dashboard module
-        \item \texttt{labs.js} - Lab technician module
-        \item \texttt{signin.js} - Authentication server
-        \item \texttt{home.js} - Main server with 30+ API endpoints
-        \item \texttt{Hospital.js} - Hospital management module
-        \item \texttt{HospitalRegistration.js} - Hospital registration
-        \item \texttt{signup\_patient.js} - Patient registration
-        \item \texttt{clone.js} - Appointment booking demo
-    \end{itemize}
-    \item \texttt{.env} - Environment variables
-    \item \texttt{.gitignore} - Git ignore rules
-    \item \texttt{package.json} - Dependencies and scripts
-    \item \texttt{README.md} - Project documentation
-\end{itemize}
+\subsection*{Source Directory}
+The src directory contains all application code organized by functional area. The db subdirectory houses database configuration files including config.js, init.js, init.sql, and seed files. Patient.js, Doctor.js, admin.js, and labs.js implement role-specific dashboards. signin.js handles authentication while home.js serves as the main server with 30+ API endpoints. Hospital management, registration, and demonstration files complete the structure.
+
+\subsection*{Configuration Files}
+Environment variables are stored in .env with separate configurations for development, testing, and production. .gitignore excludes node\_modules and environment files from version control. package.json defines dependencies and scripts, while README.md provides project documentation.
 
 \section{Advantages of Technology Stack}
 
-This section summarizes the key benefits of the chosen technology stack in terms of performance, scalability, maintainability, and security.
+This section summarizes the key benefits of the chosen technology stack.
 
-\begin{itemize}
-    \item \textbf{Performance:} Node.js non-blocking I/O handles multiple concurrent requests efficiently. PostgreSQL indexing optimizes query performance. Connection pooling reduces database connection overhead. Lazy loading of dashboard components improves initial load time.
-    
-    \item \textbf{Scalability:} Horizontal scaling with multiple Node.js instances behind load balancer. Database connection pooling for high concurrency. Serverless database automatically scales compute resources. Stateless JWT authentication enables easy horizontal scaling.
-    
-    \item \textbf{Maintainability:} Modular code structure with separate files for each user role. Comprehensive documentation. Version control with Git for change tracking. Consistent coding style with ESLint and Prettier. Environment-based configuration for different deployment scenarios.
-    
-    \item \textbf{Security:} Password hashing with bcrypt. JWT for secure authentication with HTTP-only cookies. SQL injection prevention with parameterized queries. Role-based access control for all API endpoints. Environment variables for sensitive configuration.
-\end{itemize}
+\subsection*{Performance}
+Node.js non-blocking I/O handles concurrent requests efficiently. PostgreSQL indexing optimizes query performance with appointment lookups under 50ms. Connection pooling reduces database overhead, and lazy loading improves initial page load times.
+
+\subsection*{Scalability}
+Horizontal scaling with multiple Node.js instances handles increasing traffic. Database connection pooling supports high concurrency. Serverless database automatically scales compute resources. Stateless JWT authentication enables seamless scaling without session synchronization.
+
+\subsection*{Maintainability}
+Modular code structure with separate files for each user role simplifies understanding and modification. Version control provides change history and facilitates collaboration. Consistent coding style ensures code remains readable as the team grows.
+
+\subsection*{Security}
+Password hashing with bcrypt protects credentials. JWT authentication with HTTP-only cookies prevents XSS attacks. Parameterized queries eliminate SQL injection vulnerabilities. Role-based access control restricts functionality by user role.
 
 \section{Conclusion}
-The technology stack chosen for BondHealth provides a solid foundation for building a secure, scalable, and maintainable healthcare management system. Node.js/Express delivers a fast, event-driven backend, PostgreSQL with Neon offers reliable data persistence with serverless scaling, JWT with bcrypt ensures secure authentication, and Tailwind CSS with Bootstrap enables rapid, responsive UI development. The combination of these technologies has proven effective in delivering a responsive and user-friendly healthcare platform that meets the needs of all stakeholders.
+The technology stack chosen for BondHealth provides a solid foundation for a secure, scalable, and maintainable healthcare management system. Node.js/Express delivers a fast backend, PostgreSQL with Neon offers reliable data persistence, JWT with bcrypt ensures secure authentication, and Tailwind CSS enables rapid UI development. This combination effectively delivers a responsive platform meeting the needs of all stakeholders.
