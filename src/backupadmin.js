@@ -4,63 +4,53 @@
 
 const { query } = require('./db/config');
 
-// ─────────────────────────────────────────────────────────────
-// NOTE: No module-level mutable state.
-// Previously `let doctors` and `let todaysAppointments` were
-// module-globals, causing a race condition: Node caches modules,
-// so concurrent requests from different admins would overwrite
-// each other's data. All data is now passed as function parameters.
-// ─────────────────────────────────────────────────────────────
+let doctors = [];
+let todaysAppointments = [];
 
-// ── Helper: first 3 appointments preview ──────────────────────
-function getUpcomingAppointments(todaysAppointments) {
-  if (!todaysAppointments || todaysAppointments.length === 0) {
-    return '<div class="text-center py-8 text-gray-500"><i class="fas fa-calendar-times text-3xl mb-3 text-gray-300 block"></i>No appointments scheduled for today</div>';
+// ─────────────────────────────────────────────
+// Template helpers
+// home.js exports nothing – it IS the server.
+// For logout we simply redirect to '/'.
+// For hospital registration we use Hospital.js's exported function.
+// ─────────────────────────────────────────────
+function getHomePageHTML() {
+  // home.js is an Express server, not a template file.
+  // Return null so logout falls back to window.location.href = '/'.
+  return null;
+}
+
+function getHospitalRegisterHTML() {
+  try {
+    const Hospital = require('./Hospital.js');
+    if (typeof Hospital.getAddDoctorHTML === 'function') {
+      return Hospital.getAddDoctorHTML();
+    }
+    console.error('Hospital.js does not export getAddDoctorHTML()');
+    return null;
+  } catch (error) {
+    console.error('Error loading Hospital.js:', error.message);
+    return null;
   }
-  return todaysAppointments.slice(0, 3).map(appt => `
-    <div class="appointment-item p-4">
-      <div class="flex justify-between items-center">
-        <div>
-          <p class="font-medium text-gray-800">${appt.patient_name}</p>
-          <p class="text-sm text-gray-500">${appt.doctor_name}</p>
-        </div>
-        <div class="text-right">
-          <span class="font-bold text-cyan-600">${appt.token_number || 'N/A'}</span>
-          <p class="text-sm text-gray-500">${appt.appointment_time}</p>
-        </div>
-      </div>
-    </div>`).join('');
 }
 
-// ── Helper: normalise appointments for schedule table ─────────
-function getAllAppointments(todaysAppointments) {
-  if (!todaysAppointments) return [];
-  return todaysAppointments.map(appt => ({
-    time: appt.appointment_time,
-    patient: appt.patient_name,
-    token: appt.token_number || 'N/A',
-    condition: appt.reason || 'General',
-    doctorId: appt.doctor_id,
-    doctorName: appt.doctor_name,
-    doctorPhoto: appt.doctor_photo
-  }));
-}
-
-// ── Main HTML generator ───────────────────────────────────────
-function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'City General Hospital') {
-  const allAppointments = getAllAppointments(appointmentsData);
-
+function generateHTML(doctorsData = [], appointmentsData = []) {
+  doctors = doctorsData;
+  todaysAppointments = appointmentsData;
   return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${hospitalName} — Admin Dashboard</title>
+    <title>Hospital Admin Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root { --primary-color: #06b6d4; --primary-light: #ecfeff; --primary-dark: #0891b2; }
+        :root {
+            --primary-color: #06b6d4;
+            --primary-light: #ecfeff;
+            --primary-dark: #0891b2;
+        }
         body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f8fafc; margin: 0; padding: 0; }
         .sidebar { background: white; border-right: 1px solid #e2e8f0; height: 100vh; position: fixed; width: 260px; box-shadow: 2px 0 10px rgba(0,0,0,0.05); }
         .main-content { margin-left: 260px; min-height: 100vh; }
@@ -90,6 +80,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
         .token-badge { background: #06b6d4; color: white; padding: 4px 10px; border-radius: 15px; font-weight: 600; font-size: 12px; }
         .logout-btn { background: linear-gradient(135deg, #ef4444, #dc2626); transition: all 0.3s ease; }
         .logout-btn:hover { background: linear-gradient(135deg, #dc2626, #b91c1c); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(239,68,68,0.3); }
+        /* Delete button on card */
         .delete-doctor-btn { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border-radius: 50%; background: #fee2e2; color: #ef4444; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.2s; z-index: 10; font-size: 12px; }
         .doctor-card:hover .delete-doctor-btn { opacity: 1; }
         .delete-doctor-btn:hover { background: #ef4444; color: white; transform: scale(1.1); }
@@ -97,8 +88,6 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
         .btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; transition: all 0.3s ease; }
         .btn-danger:hover { background: linear-gradient(135deg, #dc2626, #b91c1c); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(239,68,68,0.3); }
         .btn-danger:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
-        .end-leave-btn { background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; cursor: pointer; transition: all 0.2s; }
-        .end-leave-btn:hover { background: linear-gradient(135deg, #059669, #047857); transform: translateY(-1px); box-shadow: 0 4px 10px rgba(16,185,129,0.3); }
         @media (max-width: 768px) { .sidebar { transform: translateX(-100%); z-index: 1000; } .sidebar.active { transform: translateX(0); } .main-content { margin-left: 0; } }
     </style>
 </head>
@@ -110,7 +99,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                 <i class="fas fa-hospital text-white text-xl"></i>
             </div>
             <div>
-                <h1 class="font-bold text-xl text-gray-800">${hospitalName}</h1>
+                <h1 class="font-bold text-xl text-gray-800">City General Hospital</h1>
                 <p class="text-sm text-cyan-600">Admin Dashboard</p>
             </div>
         </div>
@@ -124,10 +113,10 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
         <div class="pt-6 border-t border-gray-200">
             <h3 class="font-semibold text-gray-700 mb-4">Quick Stats</h3>
             <div class="space-y-3">
-                <div class="flex justify-between items-center"><span class="text-gray-600">Total Doctors</span><span class="font-bold text-cyan-600">${doctorsData.length}</span></div>
-                <div class="flex justify-between items-center"><span class="text-gray-600">Available Today</span><span class="font-bold text-green-600">${doctorsData.filter(d => d.status === 'Available').length}</span></div>
-                <div class="flex justify-between items-center"><span class="text-gray-600">On Leave</span><span class="font-bold text-amber-600">${doctorsData.filter(d => d.status === 'On Leave').length}</span></div>
-                <div class="flex justify-between items-center"><span class="text-gray-600">Today's Appointments</span><span class="font-bold text-purple-600">${appointmentsData.length}</span></div>
+                <div class="flex justify-between items-center"><span class="text-gray-600">Total Doctors</span><span class="font-bold text-cyan-600">${doctors.length}</span></div>
+                <div class="flex justify-between items-center"><span class="text-gray-600">Available Today</span><span class="font-bold text-green-600">${doctors.filter(d => d.status === 'Available').length}</span></div>
+                <div class="flex justify-between items-center"><span class="text-gray-600">On Leave</span><span class="font-bold text-amber-600">${doctors.filter(d => d.status === 'On Leave').length}</span></div>
+                <div class="flex justify-between items-center"><span class="text-gray-600">Today's Appointments</span><span class="font-bold text-purple-600">${todaysAppointments.length}</span></div>
             </div>
         </div>
         <div class="absolute bottom-6 left-6 right-6 space-y-3">
@@ -154,6 +143,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                 </button>
                 <div class="relative">
                     <i class="fas fa-bell text-gray-500 text-xl cursor-pointer"></i>
+                    <span class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">3</span>
                 </div>
                 <button onclick="logout()" class="md:hidden bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors flex items-center gap-2">
                     <i class="fas fa-sign-out-alt"></i> Sign Out
@@ -165,10 +155,10 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
             <!-- Dashboard Section -->
             <div id="dashboardSection">
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                    <div class="stats-card p-6"><div class="flex items-center justify-between"><div><p class="text-gray-500">Available Doctors</p><h3 class="text-2xl font-bold text-cyan-600">${doctorsData.filter(d => d.status === 'Available').length}</h3></div><div class="w-12 h-12 bg-cyan-100 rounded-lg flex items-center justify-center"><i class="fas fa-user-md text-cyan-600 text-xl"></i></div></div></div>
-                    <div class="stats-card p-6"><div class="flex items-center justify-between"><div><p class="text-gray-500">Today's Appointments</p><h3 class="text-2xl font-bold text-purple-600">${appointmentsData.length}</h3></div><div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center"><i class="fas fa-calendar-check text-purple-600 text-xl"></i></div></div></div>
-                    <div class="stats-card p-6"><div class="flex items-center justify-between"><div><p class="text-gray-500">Doctors on Leave</p><h3 class="text-2xl font-bold text-amber-600">${doctorsData.filter(d => d.status === 'On Leave').length}</h3></div><div class="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center"><i class="fas fa-umbrella-beach text-amber-600 text-xl"></i></div></div></div>
-                    <div class="stats-card p-6"><div class="flex items-center justify-between"><div><p class="text-gray-500">Total Staff</p><h3 class="text-2xl font-bold text-blue-600">${doctorsData.length}</h3></div><div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center"><i class="fas fa-users text-blue-600 text-xl"></i></div></div></div>
+                    <div class="stats-card p-6"><div class="flex items-center justify-between"><div><p class="text-gray-500">Available Doctors</p><h3 class="text-2xl font-bold text-cyan-600">${doctors.filter(d => d.status === 'Available').length}</h3></div><div class="w-12 h-12 bg-cyan-100 rounded-lg flex items-center justify-center"><i class="fas fa-user-md text-cyan-600 text-xl"></i></div></div></div>
+                    <div class="stats-card p-6"><div class="flex items-center justify-between"><div><p class="text-gray-500">Today's Appointments</p><h3 class="text-2xl font-bold text-purple-600">${todaysAppointments.length}</h3></div><div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center"><i class="fas fa-calendar-check text-purple-600 text-xl"></i></div></div></div>
+                    <div class="stats-card p-6"><div class="flex items-center justify-between"><div><p class="text-gray-500">Doctors on Leave</p><h3 class="text-2xl font-bold text-amber-600">${doctors.filter(d => d.status === 'On Leave').length}</h3></div><div class="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center"><i class="fas fa-umbrella-beach text-amber-600 text-xl"></i></div></div></div>
+                    <div class="stats-card p-6"><div class="flex items-center justify-between"><div><p class="text-gray-500">Emergency Cases</p><h3 class="text-2xl font-bold text-red-600">3</h3></div><div class="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center"><i class="fas fa-ambulance text-red-600 text-xl"></i></div></div></div>
                 </div>
 
                 <!-- Available Doctors -->
@@ -178,7 +168,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                         <button class="text-cyan-600 hover:text-cyan-700 font-medium" onclick="showSection('doctors')">View All →</button>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        ${doctorsData.filter(d => d.status === 'Available').map(doctor => `
+                        ${doctors.filter(d => d.status === 'Available').map(doctor => `
                         <div class="doctor-card available p-6" onclick="showDoctorSchedule('${doctor.doctor_id}')">
                             <button class="delete-doctor-btn" onclick="confirmDeleteDoctor(event, '${doctor.doctor_id}', '${doctor.full_name.replace(/'/g, "\\'")}')"><i class="fas fa-trash"></i></button>
                             <div class="flex items-center gap-4">
@@ -191,13 +181,13 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                             </div>
                             <div class="mt-4 pt-4 border-t border-gray-100">
                                 <div class="flex justify-between items-center">
-                                    <span class="text-gray-600 text-sm"><i class="fas fa-calendar-alt mr-1"></i>${appointmentsData.filter(a => a.doctor_id === doctor.doctor_id).length} appointments</span>
+                                    <span class="text-gray-600 text-sm"><i class="fas fa-calendar-alt mr-1"></i>${todaysAppointments.filter(a => a.doctor_id === doctor.doctor_id).length} appointments</span>
                                     <button class="text-cyan-600 hover:text-cyan-700 text-sm font-medium">View Schedule →</button>
                                 </div>
                             </div>
                         </div>
                         `).join('')}
-                        ${doctorsData.filter(d => d.status === 'Available').length === 0 ? `
+                        ${doctors.filter(d => d.status === 'Available').length === 0 ? `
                         <div class="col-span-3 text-center py-12 text-gray-500">
                             <i class="fas fa-user-md text-4xl mb-3 text-gray-300"></i>
                             <p>No doctors available today</p>
@@ -211,30 +201,24 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <div class="bg-white rounded-lg border border-gray-200 p-6">
                             <h4 class="font-bold text-gray-800 mb-4">Upcoming Appointments</h4>
-                            <div class="space-y-3">${getUpcomingAppointments(appointmentsData)}</div>
+                            <div class="space-y-3">${getUpcomingAppointments()}</div>
                         </div>
                         <div class="bg-white rounded-lg border border-gray-200 p-6">
                             <h4 class="font-bold text-gray-800 mb-4">Doctors on Leave</h4>
                             <div class="space-y-3">
-                                ${doctorsData.filter(d => d.status === 'On Leave').map(doctor => `
+                                ${doctors.filter(d => d.status === 'On Leave').map(doctor => `
                                 <div class="p-4 bg-amber-50 border border-amber-200 rounded-lg">
                                     <div class="flex items-center gap-3">
                                         <img src="${doctor.photo_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(doctor.full_name) + '&background=f59e0b&color=fff'}" alt="${doctor.full_name}" class="w-10 h-10 rounded-full object-cover">
                                         <div class="flex-1">
                                             <p class="font-medium text-gray-800">${doctor.full_name}</p>
-                                            <p class="text-amber-600 text-sm">${doctor.leaveFrom ? new Date(doctor.leaveFrom).toLocaleDateString() : 'N/A'} → ${doctor.leaveTo ? new Date(doctor.leaveTo).toLocaleDateString() : 'N/A'}</p>
+                                            <p class="text-amber-600 text-sm">${doctor.leaveFrom || 'N/A'} to ${doctor.leaveTo || 'N/A'}</p>
                                         </div>
-                                        <div class="flex flex-col items-end gap-2">
-                                            <span class="status-badge status-leave">On Leave</span>
-                                            <button class="end-leave-btn text-xs px-3 py-1 rounded-full font-medium"
-                                                    onclick="confirmEndLeave(event, '${doctor.doctor_id}', '${doctor.full_name.replace(/'/g, "\\'")}')">
-                                                <i class="fas fa-check mr-1"></i>End Leave
-                                            </button>
-                                        </div>
+                                        <span class="status-badge status-leave">On Leave</span>
                                     </div>
                                 </div>
                                 `).join('')}
-                                ${doctorsData.filter(d => d.status === 'On Leave').length === 0 ? `
+                                ${doctors.filter(d => d.status === 'On Leave').length === 0 ? `
                                 <div class="text-center py-8 text-gray-500"><i class="fas fa-check-circle text-3xl mb-3 text-gray-300"></i><p>No doctors on leave today</p></div>` : ''}
                             </div>
                         </div>
@@ -251,7 +235,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                     </button>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    ${doctorsData.map(doctor => `
+                    ${doctors.map(doctor => `
                     <div class="doctor-card ${doctor.status === 'Available' ? 'available' : 'leave'} p-6" onclick="showDoctorSchedule('${doctor.doctor_id}')">
                         <button class="delete-doctor-btn" onclick="confirmDeleteDoctor(event, '${doctor.doctor_id}', '${doctor.full_name.replace(/'/g, "\\'")}')"><i class="fas fa-trash"></i></button>
                         <div class="flex items-center gap-4">
@@ -267,7 +251,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                                 <p class="text-gray-600 text-sm"><i class="fas fa-envelope mr-2"></i>${doctor.email || ''}</p>
                                 <p class="text-gray-600 text-sm"><i class="fas fa-phone-alt mr-2"></i>${doctor.phone || ''}</p>
                                 <div class="flex justify-between items-center mt-2">
-                                    <span class="text-gray-600 text-sm"><i class="fas fa-calendar mr-1"></i>${appointmentsData.filter(a => a.doctor_id === doctor.doctor_id).length} appointments</span>
+                                    <span class="text-gray-600 text-sm"><i class="fas fa-calendar mr-1"></i>${todaysAppointments.filter(a => a.doctor_id === doctor.doctor_id).length} appointments</span>
                                     <button class="text-cyan-600 hover:text-cyan-700 text-sm font-medium">View Schedule →</button>
                                 </div>
                             </div>
@@ -284,7 +268,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                     <table class="schedule-table">
                         <thead><tr><th>Time</th><th>Doctor</th><th>Patient</th><th>Token</th><th>Condition</th></tr></thead>
                         <tbody>
-                            ${allAppointments.map(appt => `
+                            ${getAllAppointments().map(appt => `
                             <tr onclick="showDoctorSchedule('${appt.doctorId}')" style="cursor:pointer;">
                                 <td class="font-medium">${appt.time}</td>
                                 <td><div class="flex items-center gap-2"><img src="${appt.doctorPhoto || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(appt.doctorName) + '&background=06b6d4&color=fff'}" alt="${appt.doctorName}" class="w-8 h-8 rounded-full object-cover"><span>${appt.doctorName}</span></div></td>
@@ -293,7 +277,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                                 <td class="text-gray-600">${appt.condition}</td>
                             </tr>
                             `).join('')}
-                            ${allAppointments.length === 0 ? `<tr><td colspan="5" class="text-center py-8 text-gray-500"><i class="fas fa-calendar-times text-3xl mb-3 text-gray-300 block"></i>No appointments scheduled for today</td></tr>` : ''}
+                            ${getAllAppointments().length === 0 ? `<tr><td colspan="5" class="text-center py-8 text-gray-500"><i class="fas fa-calendar-times text-3xl mb-3 text-gray-300 block"></i>No appointments scheduled for today</td></tr>` : ''}
                         </tbody>
                     </table>
                 </div>
@@ -328,7 +312,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                             <label class="block text-gray-700 mb-2">Select Doctor</label>
                             <select id="leaveDoctor" class="w-full p-3 border border-gray-300 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200" required>
                                 <option value="">Choose a doctor</option>
-                                ${doctorsData.map(doctor => `<option value="${doctor.doctor_id}">${doctor.full_name} — ${doctor.specialization || ''}</option>`).join('')}
+                                ${doctors.map(doctor => `<option value="${doctor.doctor_id}">${doctor.full_name} - ${doctor.specialization || ''}</option>`).join('')}
                             </select>
                         </div>
                         <div class="grid grid-cols-2 gap-4">
@@ -358,8 +342,9 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                     <p class="text-red-700 text-sm font-medium mb-2"><i class="fas fa-exclamation-triangle mr-2"></i>This action will permanently:</p>
                     <ul class="text-red-600 text-sm space-y-1 ml-6 list-disc">
                         <li>Remove the doctor from this hospital</li>
+                        <li>Delete all associated leave records</li>
                         <li>Cancel all future appointments</li>
-                        <li>Remove their account access</li>
+                        <li>Remove their user account access</li>
                     </ul>
                     <p class="text-red-700 text-sm font-bold mt-3">This cannot be undone.</p>
                 </div>
@@ -380,41 +365,17 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
         </div>
     </div>
 
-    <!-- END LEAVE CONFIRMATION MODAL -->
-    <div class="modal" id="endLeaveModal">
-        <div class="modal-content modal-sm">
-            <div class="p-8">
-                <div class="text-center mb-4">
-                    <div class="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
-                        <i class="fas fa-calendar-check text-green-600 text-2xl"></i>
-                    </div>
-                    <h2 class="text-xl font-bold text-gray-800">End Doctor Leave</h2>
-                    <p class="text-gray-500 text-sm mt-1">Mark <span id="endLeaveDoctorName" class="font-semibold text-gray-700"></span> as available?</p>
-                </div>
-                <p class="text-sm text-gray-600 text-center mb-6">This will set their status back to <strong>Available</strong> and mark their current leave as completed.</p>
-                <div class="flex gap-3">
-                    <button onclick="closeModal('endLeaveModal')" class="flex-1 px-4 py-3 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium">Cancel</button>
-                    <button onclick="executeEndLeave()" id="confirmEndLeaveBtn"
-                        class="end-leave-btn flex-1 px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2">
-                        <i class="fas fa-check"></i> Confirm
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <script>
-        // Data embedded at render time — no globals mutated after this point
-        const doctorsData = ${JSON.stringify(doctorsData)};
-        const todaysAppointmentsData = ${JSON.stringify(appointmentsData)};
+        const doctorsData = ${JSON.stringify(doctors)};
+        const todaysAppointmentsData = ${JSON.stringify(todaysAppointments)};
 
-        // ── Delete state ───────────────────────────────────────────────
-        let pendingDeleteDoctorId   = null;
+        // ── Delete state ──────────────────────────────────────
+        let pendingDeleteDoctorId = null;
         let pendingDeleteDoctorName = null;
 
         function confirmDeleteDoctor(event, doctorId, doctorName) {
             event.stopPropagation();
-            pendingDeleteDoctorId   = doctorId;
+            pendingDeleteDoctorId = doctorId;
             pendingDeleteDoctorName = doctorName;
             document.getElementById('deleteDoctorNameDisplay').textContent = doctorName;
             document.getElementById('deleteConfirmInput').value = '';
@@ -432,11 +393,15 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Removing...';
             try {
-                const res  = await fetch('/api/doctors/' + pendingDeleteDoctorId, { method: 'DELETE', headers: { 'Content-Type': 'application/json' } });
-                const data = await res.json();
-                if (res.ok && data.success) {
+                const response = await fetch(\`/api/doctors/\${pendingDeleteDoctorId}\`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
                     closeModal('deleteModal');
-                    showToast('Dr. ' + pendingDeleteDoctorName + ' has been removed.', 'success');
+                    showToast(\`Dr. \${pendingDeleteDoctorName} has been removed.\`, 'success');
+                    // Fade out and remove matching cards
                     document.querySelectorAll('.doctor-card').forEach(card => {
                         if (card.getAttribute('onclick')?.includes(pendingDeleteDoctorId)) {
                             card.style.transition = 'all 0.4s ease';
@@ -454,59 +419,24 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-trash-alt mr-2"></i> Remove Doctor';
             } finally {
-                pendingDeleteDoctorId = pendingDeleteDoctorName = null;
+                pendingDeleteDoctorId = null;
+                pendingDeleteDoctorName = null;
             }
         }
+        // ─────────────────────────────────────────────────────
 
-        // ── End-leave state ────────────────────────────────────────────
-        let pendingEndLeaveDoctorId   = null;
-        let pendingEndLeaveDoctorName = null;
-
-        function confirmEndLeave(event, doctorId, doctorName) {
-            event.stopPropagation();
-            pendingEndLeaveDoctorId   = doctorId;
-            pendingEndLeaveDoctorName = doctorName;
-            document.getElementById('endLeaveDoctorName').textContent = doctorName;
-            document.getElementById('endLeaveModal').style.display = 'flex';
-        }
-
-        async function executeEndLeave() {
-            if (!pendingEndLeaveDoctorId) return;
-            const btn = document.getElementById('confirmEndLeaveBtn');
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Processing...';
-            try {
-                const res  = await fetch('/api/doctors/' + pendingEndLeaveDoctorId + '/leave', { method: 'DELETE', headers: { 'Content-Type': 'application/json' } });
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    closeModal('endLeaveModal');
-                    showToast(pendingEndLeaveDoctorName + ' is now available.', 'success');
-                    setTimeout(() => window.location.reload(), 1500);
-                } else {
-                    throw new Error(data.message || 'Failed to end leave');
-                }
-            } catch (error) {
-                showToast('Error: ' + error.message, 'error');
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-check mr-2"></i> Confirm';
-            } finally {
-                pendingEndLeaveDoctorId = pendingEndLeaveDoctorName = null;
-            }
-        }
-
-        // ── Navigation ─────────────────────────────────────────────────
         function showSection(sectionId) {
             ['dashboard','doctors','schedule'].forEach(s => document.getElementById(s + 'Section').classList.add('hidden'));
             document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
             document.getElementById(sectionId + 'Section').classList.remove('hidden');
-            const navIdx = { dashboard: 0, doctors: 1, schedule: 2 };
-            document.querySelectorAll('.nav-item')[navIdx[sectionId]]?.classList.add('active');
+            const navItems = { dashboard: 0, doctors: 1, schedule: 2 };
+            document.querySelectorAll('.nav-item')[navItems[sectionId]]?.classList.add('active');
             const titles = { dashboard: 'Dashboard Overview', doctors: 'All Doctors', schedule: "Today's Schedule" };
             document.getElementById('pageTitle').textContent = titles[sectionId] || 'Dashboard';
         }
 
         function openDoctorRegistration() { window.location.href = '/hospital-dashboard'; }
-        function openAddDoctorForm()      { window.location.href = '/add-doctor'; }
+        function openAddDoctorForm() { window.location.href = '/add-doctor'; }
 
         function logout() {
             fetch('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
@@ -514,14 +444,12 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                 .catch(() => window.location.href = '/');
         }
 
-        // ── Doctor schedule modal ──────────────────────────────────────
         function showDoctorSchedule(doctorId) {
             const doctor = doctorsData.find(d => d.doctor_id === doctorId);
             if (!doctor) return;
             document.getElementById('scheduleDoctorName').textContent = doctor.full_name + "'s Schedule";
             const doctorAppointments = todaysAppointmentsData.filter(a => a.doctor_id === doctorId);
-
-            const appointmentsHtml = doctorAppointments.length > 0 ? \`
+            let appointmentsHtml = doctorAppointments.length > 0 ? \`
                 <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
                     <table class="w-full">
                         <thead><tr class="bg-gray-50">
@@ -540,10 +468,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                             </tr>\`).join('')}
                         </tbody>
                     </table>
-                </div>
-            \` : \`<div class="text-center py-8 text-gray-500"><i class="fas fa-calendar-times text-3xl mb-3 text-gray-300 block"></i>No appointments scheduled for today</div>\`;
-
-            const escapedName = doctor.full_name.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'");
+                </div>\` : \`<div class="text-center py-8 text-gray-500"><i class="fas fa-calendar-times text-3xl mb-3 text-gray-300 block"></i>No appointments scheduled for today</div>\`;
 
             document.getElementById('scheduleContent').innerHTML = \`
                 <div class="space-y-6">
@@ -557,16 +482,10 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                         </div>
                     </div>
                     \${doctor.status === 'On Leave' ? \`
-                    <div class="p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start justify-between gap-4">
-                        <div>
-                            <h4 class="font-bold text-amber-800 mb-1"><i class="fas fa-umbrella-beach mr-2"></i>Currently On Leave</h4>
-                            <p class="text-amber-700 text-sm">\${doctor.leaveFrom ? new Date(doctor.leaveFrom).toLocaleDateString() : 'N/A'} → \${doctor.leaveTo ? new Date(doctor.leaveTo).toLocaleDateString() : 'N/A'}</p>
-                            <p class="text-amber-600 text-sm mt-1">\${doctor.leaveReason || 'Not specified'}</p>
-                        </div>
-                        <button class="end-leave-btn px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1 whitespace-nowrap"
-                                onclick="closeModal('scheduleModal'); setTimeout(() => confirmEndLeave({ stopPropagation: ()=>{} }, '\${doctor.doctor_id}', '\${escapedName}'), 100)">
-                            <i class="fas fa-check"></i> End Leave
-                        </button>
+                    <div class="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                        <h4 class="font-bold text-amber-800 mb-2"><i class="fas fa-umbrella-beach mr-2"></i>On Leave</h4>
+                        <p class="text-amber-700">From \${doctor.leaveFrom || 'N/A'} to \${doctor.leaveTo || 'N/A'}</p>
+                        <p class="text-amber-600 text-sm mt-1">\${doctor.leaveReason || 'Not specified'}</p>
                     </div>\` : ''}
                     <div class="flex justify-between items-center mb-4">
                         <h4 class="font-bold text-gray-800">Today's Appointments</h4>
@@ -576,75 +495,64 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
                     <div class="pt-4 border-t border-gray-200 flex gap-3">
                         <button class="bg-cyan-600 text-white flex-1 py-3 rounded-lg hover:bg-cyan-700 flex items-center justify-center gap-2"
                                 onclick="showLeaveModalForDoctor('\${doctor.doctor_id}')">
-                            <i class="fas fa-calendar-times"></i> Set Leave
+                            <i class="fas fa-calendar-times"></i> Update Leave Status
                         </button>
                         <button class="btn-danger px-6 py-3 rounded-lg flex items-center justify-center gap-2"
-                                onclick="closeModal('scheduleModal'); setTimeout(() => confirmDeleteDoctor({ stopPropagation: ()=>{} }, '\${doctor.doctor_id}', '\${escapedName}'), 100)">
-                            <i class="fas fa-user-minus"></i> Remove
+                                onclick="closeModal('scheduleModal'); setTimeout(() => confirmDeleteDoctor({ stopPropagation: ()=>{} }, '\${doctor.doctor_id}', '\${doctor.full_name.replace(/'/g, "\\\\'")}'), 100)">
+                            <i class="fas fa-user-minus"></i> Remove Doctor
                         </button>
                     </div>
                 </div>\`;
             document.getElementById('scheduleModal').style.display = 'flex';
         }
 
-        // ── Leave modal ────────────────────────────────────────────────
         function showLeaveModal() { document.getElementById('leaveModal').style.display = 'flex'; }
         function showLeaveModalForDoctor(doctorId) {
             document.getElementById('leaveDoctor').value = doctorId;
-            closeModal('scheduleModal');
             showLeaveModal();
+            closeModal('scheduleModal');
         }
         function closeModal(modalId) { document.getElementById(modalId).style.display = 'none'; }
 
         function submitLeaveForm(event) {
             event.preventDefault();
             const doctorId = document.getElementById('leaveDoctor').value;
-            const doctor   = doctorsData.find(d => d.doctor_id === doctorId);
+            const doctor = doctorsData.find(d => d.doctor_id === doctorId);
             if (!doctor) { alert('Please select a doctor'); return; }
-            const fromDate = document.getElementById('leaveFromDate').value;
-            const toDate   = document.getElementById('leaveToDate').value;
-            if (toDate < fromDate) { alert('End date cannot be before start date'); return; }
-            fetch('/api/doctors/' + doctorId + '/leave', {
+            fetch(\`/api/doctors/\${doctorId}/leave\`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ from: fromDate, to: toDate, reason: document.getElementById('leaveReason').value })
+                body: JSON.stringify({
+                    from: document.getElementById('leaveFromDate').value,
+                    to: document.getElementById('leaveToDate').value,
+                    reason: document.getElementById('leaveReason').value
+                })
             })
             .then(r => r.json())
             .then(data => {
-                if (data.success) {
-                    showToast('Leave updated for ' + doctor.full_name);
-                    closeModal('leaveModal');
-                    setTimeout(() => window.location.reload(), 1500);
-                } else {
-                    alert('Failed to update leave: ' + (data.message || 'Unknown error'));
-                }
+                if (data.success) { showToast(\`Leave updated for \${doctor.full_name}\`); closeModal('leaveModal'); setTimeout(() => window.location.reload(), 1500); }
+                else alert('Failed to update leave: ' + (data.message || 'Unknown error'));
             })
             .catch(() => alert('Failed to update leave. Please try again.'));
         }
 
-        // ── Toast ──────────────────────────────────────────────────────
         function showToast(message, type = 'success') {
             const colors = { success: 'bg-cyan-600', error: 'bg-red-600' };
-            const icons  = { success: 'fa-check-circle', error: 'fa-exclamation-circle' };
-            const toast  = document.createElement('div');
-            toast.className = 'fixed bottom-4 right-4 ' + colors[type] + ' text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-2 z-50';
-            toast.innerHTML = '<i class="fas ' + icons[type] + '"></i><span>' + message + '</span>';
+            const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle' };
+            const toast = document.createElement('div');
+            toast.className = \`fixed bottom-4 right-4 \${colors[type]} text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-2 z-50\`;
+            toast.innerHTML = \`<i class="fas \${icons[type]}"></i><span>\${message}</span>\`;
             document.body.appendChild(toast);
-            setTimeout(() => {
-                toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s';
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
+            setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s'; setTimeout(() => toast.remove(), 300); }, 3000);
         }
 
-        // ── Init ───────────────────────────────────────────────────────
         document.addEventListener('DOMContentLoaded', () => {
-            const today    = new Date().toISOString().split('T')[0];
+            const today = new Date().toISOString().split('T')[0];
             const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-            document.getElementById('leaveFromDate').min   = today;
+            document.getElementById('leaveFromDate').min = today;
             document.getElementById('leaveFromDate').value = today;
-            document.getElementById('leaveToDate').min     = today;
-            document.getElementById('leaveToDate').value   = tomorrow.toISOString().split('T')[0];
-            // Close modal on backdrop click
+            document.getElementById('leaveToDate').min = today;
+            document.getElementById('leaveToDate').value = tomorrow.toISOString().split('T')[0];
             window.addEventListener('click', e => { if (e.target.classList.contains('modal')) e.target.style.display = 'none'; });
         });
     </script>
@@ -652,56 +560,76 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalName = 'C
 </html>`;
 }
 
-// ── Main export ────────────────────────────────────────────────
+// ── Helper functions ───────────────────────────────────────
+function getUpcomingAppointments() {
+  if (!todaysAppointments || todaysAppointments.length === 0) {
+    return '<div class="text-center py-8 text-gray-500"><i class="fas fa-calendar-times text-3xl mb-3 text-gray-300 block"></i>No appointments scheduled for today</div>';
+  }
+  return todaysAppointments.slice(0, 3).map(appt => `
+    <div class="appointment-item p-4">
+      <div class="flex justify-between items-center">
+        <div><p class="font-medium text-gray-800">${appt.patient_name}</p><p class="text-sm text-gray-500">${appt.doctor_name}</p></div>
+        <div class="text-right"><span class="font-bold text-cyan-600">${appt.token_number || 'N/A'}</span><p class="text-sm text-gray-500">${appt.appointment_time}</p></div>
+      </div>
+    </div>`).join('');
+}
+
+function getAllAppointments() {
+  if (!todaysAppointments) return [];
+  return todaysAppointments.map(appt => ({
+    time: appt.appointment_time,
+    patient: appt.patient_name,
+    token: appt.token_number || 'N/A',
+    condition: appt.reason || 'General',
+    doctorId: appt.doctor_id,
+    doctorName: appt.doctor_name,
+    doctorPhoto: appt.doctor_photo
+  }));
+}
+
+// ── Main export ────────────────────────────────────────────
 module.exports = async function renderAdminDashboard(userId) {
   try {
     const adminResult = await query(
-      `SELECT ha.hospital_id, h.name as hospital_name
-       FROM hospital_admins ha
-       JOIN hospitals h ON h.hospital_id = ha.hospital_id
-       WHERE ha.user_id = $1`,
+      `SELECT hospital_id FROM hospital_admins WHERE user_id = $1`,
       [userId]
     );
 
-    const row = adminResult.rows[0];
-    if (!row?.hospital_id) {
+    const hospitalId = adminResult.rows[0]?.hospital_id;
+    if (!hospitalId) {
       console.error('No hospital found for admin user:', userId);
       return '<h1>Error: No hospital associated with this admin account</h1>';
     }
 
-    const { hospital_id: hospitalId, hospital_name: hospitalName } = row;
-
-    // Load all non-inactive doctors with their current leave (if any)
+    // Load doctors for this hospital
     const doctorsResult = await query(
       `SELECT d.*, h.name as hospital_name,
-              dl.from_date as "leaveFrom",
-              dl.to_date   as "leaveTo",
-              dl.reason    as "leaveReason"
+              dl.from_date as "leaveFrom", dl.to_date as "leaveTo", dl.reason as "leaveReason"
        FROM doctors d
        JOIN hospitals h ON d.hospital_id = h.hospital_id
        LEFT JOIN LATERAL (
            SELECT from_date, to_date, reason
            FROM doctor_leave
            WHERE doctor_id = d.doctor_id
-             AND status    = 'Approved'
+             AND status = 'Approved'
              AND from_date <= CURRENT_DATE
-             AND to_date   >= CURRENT_DATE
+             AND to_date >= CURRENT_DATE
            ORDER BY created_at DESC
            LIMIT 1
        ) dl ON true
        WHERE d.hospital_id = $1
-         AND d.status != 'Inactive'
+       AND d.status != 'Inactive'
        ORDER BY d.full_name`,
       [hospitalId]
     );
 
     // Load today's appointments
-    // DATE() cast handles both DATE and TIMESTAMP columns safely
+    // Uses DATE() cast to handle both DATE and TIMESTAMP columns safely
     const appointmentsResult = await query(
       `SELECT a.*,
-              p.full_name AS patient_name,
-              d.full_name AS doctor_name,
-              d.photo_url AS doctor_photo,
+              p.full_name  AS patient_name,
+              d.full_name  AS doctor_name,
+              d.photo_url  AS doctor_photo,
               d.doctor_id
        FROM appointments a
        JOIN patients p ON a.patient_id = p.patient_id
@@ -713,7 +641,7 @@ module.exports = async function renderAdminDashboard(userId) {
       [hospitalId]
     );
 
-    return generateHTML(doctorsResult.rows, appointmentsResult.rows, hospitalName);
+    return generateHTML(doctorsResult.rows, appointmentsResult.rows);
   } catch (error) {
     console.error('Error loading admin dashboard data:', error);
     return `<h1>Error loading dashboard</h1><p>${error.message}</p>`;
