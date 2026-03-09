@@ -99,7 +99,7 @@ async function getPatientHistory(labTechId) {
 async function getRecentPatients(labTechId) {
     try {
         const result = await query(
-            `SELECT DISTINCT p.patient_uuid
+            `SELECT DISTINCT p.patient_uuid, lr.created_at
              FROM lab_reports lr
              JOIN patients p ON lr.patient_id = p.patient_id
              WHERE lr.lab_tech_id = $1
@@ -163,6 +163,62 @@ async function saveLabReport(reportData, labTechId) {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error saving lab report:', error);
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
+async function saveLabReportWithFile(reportData, labTechId, fileUrl) {
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
+        
+        // Get patient_id from patient_uuid
+        const patientResult = await client.query(
+            'SELECT patient_id FROM patients WHERE patient_uuid = $1',
+            [reportData.pid]
+        );
+        
+        if (patientResult.rows.length === 0) {
+            throw new Error('Patient not found');
+        }
+        
+        // Get doctor_id from doctor_id
+        const doctorResult = await client.query(
+            'SELECT doctor_id FROM doctors WHERE doctor_uuid = $1 OR doctor_id::text = $1',
+            [reportData.docId]
+        );
+        
+        const reportUUID = 'REP-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
+        
+        // Insert lab report with file_url - FIXED: 9 values for 9 placeholders
+        const result = await client.query(
+            `INSERT INTO lab_reports (
+                report_uuid, patient_id, doctor_id, lab_tech_id,
+                test_type, test_date, findings, file_url, status,
+                priority, shared_with
+            ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, $7, $8, $9, $10)
+            RETURNING report_id, report_uuid`,
+            [
+                reportUUID,
+                patientResult.rows[0].patient_id,
+                doctorResult.rows[0]?.doctor_id || null,
+                labTechId,
+                reportData.testType,
+                reportData.testResults || 'No findings',
+                fileUrl,
+                'completed',  // status
+                reportData.priority || 'normal',
+                reportData.sendTo
+            ]
+        );
+        
+        await client.query('COMMIT');
+        return result.rows[0].report_uuid;
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error saving lab report with file:', error);
         throw error;
     } finally {
         client.release();
@@ -939,7 +995,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
         // Form Submission
         // Form Submission
-        document.getElementById('submitReport').addEventListener('click', function(e) {
+        // Form Submission
+        // Form Submission
+        // Form Submission
+        document.getElementById('submitReport').addEventListener('click', async function(e) {
             e.preventDefault();
             
             // Get form values
@@ -949,28 +1008,51 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             const priority = document.getElementById('priority').value;
             const testResults = document.getElementById('testResults').value;
             const sendTo = document.querySelector('input[name="sendTo"]:checked').value;
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
             
             // Basic validation
-            if (!pid || !docId || !testType || !testResults) {
+            if (!pid || !testType || !testResults) {
                 alert('Please fill in all required fields');
                 return;
             }
             
+            // Check if file is selected
+            if (!file) {
+                alert('Please select a file to upload');
+                return;
+            }
+            
+            // Check file size (100MB limit)
+            if (file.size > 100 * 1024 * 1024) {
+                alert('File size exceeds 100MB limit');
+                return;
+            }
+            
+            // Show uploading indicator
+            const btn = this;
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span>⏳</span> Uploading...';
+            
+            // Create FormData for file upload
+            const formData = new FormData();
+            formData.append('report', file);
+            formData.append('patientId', pid);
+            formData.append('doctorId', docId || '');
+            formData.append('testType', testType);
+            formData.append('priority', priority);
+            formData.append('findings', testResults);
+            formData.append('sendTo', sendTo);
+            
             // Send to server
-            fetch('/api/send-report', {
+            fetch('/api/lab/upload-report', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-User-Id': document.getElementById('techId').value // Send technician ID
+                    'X-User-Id': document.getElementById('techId').value
+                    // Don't set Content-Type - browser will set it with boundary for FormData
                 },
-                body: JSON.stringify({
-                    pid: pid,
-                    docId: docId,
-                    testType: testType,
-                    priority: priority,
-                    testResults: testResults,
-                    sendTo: sendTo
-                })
+                body: formData
             })
             .then(response => response.json())
             .then(data => {
@@ -982,8 +1064,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                     else if (sendTo === 'patient') recipientText = 'Patient';
                     else recipientText = 'Doctor & Patient';
                     
-                    successMessage.querySelector('.success-text').textContent = 
-                        'Report for Patient ' + pid + ' sent to ' + recipientText + ' (ID: ' + data.reportId + ')';
+                    successMessage.querySelector('.success-text').textContent = "Report for Patient " + pid + " sent to " + recipientText + " with file: " + file.name;
                     successMessage.classList.add('show');
                     
                     // Reset form
@@ -1014,8 +1095,23 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             .catch(error => {
                 console.error('Error:', error);
                 alert('Network error. Please try again.');
+            })
+            .finally(() => {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
             });
         });
+
+        // Add reset form function
+        function resetUploadForm() {
+            document.getElementById('pid').value = '';
+            document.getElementById('docId').value = '';
+            document.getElementById('testType').value = '';
+            document.getElementById('priority').value = 'normal';
+            document.getElementById('testResults').value = '';
+            document.getElementById('fileName').textContent = '';
+            document.getElementById('fileInput').value = '';
+        }
 
         // Function to fetch patient history from server
         function fetchPatientHistory() {
@@ -1140,6 +1236,16 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             });
         }
 
+        // Reset upload form
+        function resetUploadForm() {
+            document.getElementById('pid').value = '';
+            document.getElementById('docId').value = '';
+            document.getElementById('testType').value = '';
+            document.getElementById('priority').value = 'normal';
+            document.getElementById('testResults').value = '';
+            document.getElementById('fileName').textContent = '';
+            document.getElementById('fileInput').value = '';
+        }
         // Auto-suggest for Doctor ID
         document.getElementById('docId').addEventListener('input', function(e) {
             const value = e.target.value;
@@ -1175,7 +1281,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
     </script>
 </body>
 </html>`;
-
+/*
 // Create HTTP server
 // Create HTTP server
 const server = http.createServer(async (req, res) => {
@@ -1278,16 +1384,31 @@ const server = http.createServer(async (req, res) => {
                     return;
                 }
                 
-                // Save to database
-                const reportId = await saveLabReport(data, labTech.lab_tech_id);
-                
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({
-                    success: true,
-                    message: 'Lab report submitted successfully',
-                    reportId: reportId,
-                    timestamp: new Date().toISOString()
-                }));
+                // Check if this is a file upload request
+                if (data.hasFile) {
+                    // For now, we'll just save without file until we implement proper file upload
+                    // In a real implementation, you'd handle multipart/form-data here
+                    const reportId = await saveLabReportWithFile(data, labTech.lab_tech_id, data.fileUrl || '');
+                    
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        success: true,
+                        message: 'Lab report with file submitted successfully',
+                        reportId: reportId,
+                        timestamp: new Date().toISOString()
+                    }));
+                } else {
+                    // Save to database (without file)
+                    const reportId = await saveLabReport(data, labTech.lab_tech_id);
+                    
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        success: true,
+                        message: 'Lab report submitted successfully',
+                        reportId: reportId,
+                        timestamp: new Date().toISOString()
+                    }));
+                }
             } catch (error) {
                 console.error('Error saving report:', error);
                 res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1336,7 +1457,7 @@ if (require.main === module) {
         console.log('   🔗 Sign Out returns to: http://localhost:3001/');
     });
 }
-
+*/
 // ============================================
 // EXPORT for signin.js
 // ============================================

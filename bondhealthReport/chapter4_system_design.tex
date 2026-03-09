@@ -20,6 +20,10 @@ doctors, hospital administrators, and laboratory technicians.
 The BondHealth platform is built on a robust three-tier architecture ensuring scalability,
 maintainability, and security while providing seamless connectivity between all stakeholders,
 with clear separation of concerns between presentation, business logic, and data persistence layers.
+Each tier is designed to operate independently while communicating through well-defined interfaces,
+allowing any single layer to be scaled or modified without disrupting the others. The three tiers
+are the Presentation Layer, the Application Layer, and the Data Layer, each of which is described in
+detail below.
 
 \begin{figure}[ht]
     \centering
@@ -37,6 +41,7 @@ mobile-first design. Key advantages include fast initial page loads, improved SE
 security by keeping business logic on the server, and a consistent experience across all
 devices and screen sizes.
 
+\noindent
 \justifying
 The interface is organized into role-specific dashboards: patient dashboards focus on
 appointment management and medical record access, doctor dashboards prioritize clinical
@@ -47,18 +52,25 @@ technician dashboards streamline test processing and result reporting.
 
 \justifying
 The application layer implements all business logic, validation, workflow orchestration, and
-security controls using Node.js with the Express framework. Key components include RESTful
-API endpoints, JWT-based authentication middleware, Role-Based Access Control (RBAC),
-a request validation layer, centralized error handling, and request rate limiting for
-denial-of-service protection.
+security controls using Node.js with the Express framework. It exposes RESTful API endpoints
+consumed by the presentation layer and enforces security at every request boundary. JWT-based
+authentication middleware validates tokens on each protected route, while Role-Based Access
+Control (RBAC) ensures that users can only perform operations permitted by their assigned role.
+A dedicated request validation layer rejects malformed or incomplete payloads before they reach
+any business logic, and centralized error handling ensures that all failure modes return consistent,
+structured responses. Request rate limiting is applied at the router level to protect against
+denial-of-service conditions.
 
 \subsection{Data Layer (Database Tier)}
 
 \justifying
 The data layer manages all persistent storage using Neon PostgreSQL, a serverless solution
-offering automatic scaling, connection pooling via \texttt{@neondatabase/serverless}, UUID v4
-primary keys, native PostgreSQL array types, foreign key constraints for referential
-integrity, and SSL encryption for all database connections.
+offering automatic scaling and high availability. Connections are managed through the
+\texttt{@neondatabase/serverless} pooling adapter, which eliminates per-request connection
+overhead while respecting Neon's serverless concurrency limits. All primary keys use UUID v4
+to support distributed record generation without coordination. Native PostgreSQL array types
+are used for multi-value attributes, foreign key constraints enforce referential integrity
+across all relationships, and SSL encryption is required for every database connection.
 
 % =============================================================================
 % 4.2 DATA FLOW DIAGRAMS
@@ -68,17 +80,22 @@ integrity, and SSL encryption for all database connections.
 
 \justifying
 Data Flow Diagrams (DFDs) provide a graphical representation of how information moves
-through the BondHealth platform. This section describes the three most critical workflows.
+through the BondHealth platform. They capture the inputs, transformations, and outputs at each
+stage of a workflow, making it possible to reason about correctness, latency, and failure
+modes before implementation. This section describes the three most critical workflows in the
+system: appointment booking, lab report processing, and payment processing.
 
 \subsection{Appointment Booking Data Flow}
 
 \justifying
 The appointment booking process enables patients to schedule consultations with doctors based
-on real-time availability. The workflow proceeds as follows: the patient authenticates via
-JWT, searches and filters doctors by specialization and availability, selects a time slot
-with double-booking prevention via database transactions, completes payment through the
-integrated gateway, and receives confirmation via email, SMS, and in-app notifications. Both
-the patient and doctor dashboards are updated immediately upon booking.
+on real-time availability. The workflow begins when the patient authenticates via JWT and
+proceeds to search and filter doctors by specialization and availability. Once a suitable
+doctor is identified, the patient selects a time slot; database transactions prevent
+double-booking by locking the slot for the duration of the operation. The patient then
+completes payment through the integrated gateway, after which confirmation is dispatched via
+email, SMS, and in-app notifications. Both the patient and doctor dashboards are updated
+immediately upon booking, ensuring that neither party sees stale schedule information.
 
 \begin{figure}[ht]
     \centering
@@ -90,21 +107,28 @@ the patient and doctor dashboards are updated immediately upon booking.
 \subsection{Lab Report Processing Data Flow}
 
 \justifying
-Lab technicians authenticate with a \texttt{lab} role, locate patients via UUID, name, or
-QR code, select test types from a predefined list, and enter results with real-time range
-validation and critical value alerts. A priority level is assigned, supporting files are
-virus-scanned before storage, sharing preferences are configured, and the report is
-submitted — triggering notifications based on priority.
+Lab technicians authenticate with a \texttt{lab} role and locate patients via UUID, name, or
+QR code. They then select test types from a predefined list and enter results, which are
+validated in real time against reference ranges; critical values trigger immediate alerts to
+the responsible clinician. A priority level is assigned to each report, and any supporting
+files are virus-scanned before being written to storage. Sharing preferences are configured
+at submission time, and once the report is submitted the system dispatches notifications
+scaled to the assigned priority level, ensuring urgent results reach the patient and doctor
+without delay.
 
 \subsection{Payment Processing Data Flow}
 
 \justifying
-The payment workflow is triggered upon appointment booking or post-consultation billing. It
-calculates the total amount due, supports multiple payment methods (card, insurance, digital
-wallet, UPI), integrates with external gateways using 3D Secure authentication, and records
-each transaction with a unique UUID and gateway reference. On success, the appointment is
-confirmed, an invoice PDF is generated, and a receipt is emailed to the patient. Webhook
-endpoints handle asynchronous gateway notifications.
+The payment workflow is triggered upon appointment booking or post-consultation billing. The
+system calculates the total amount due and presents the patient with a choice of payment
+methods, including card, insurance, digital wallet, and UPI. The transaction is routed to
+the appropriate external gateway using 3D Secure authentication to satisfy card-scheme
+requirements, and each transaction is recorded with a unique UUID alongside the gateway's
+own reference identifier. On a successful response, the appointment status is updated to
+confirmed, an invoice PDF is generated, and a receipt is emailed to the patient.
+Asynchronous gateway events, such as delayed bank confirmations, are handled through
+dedicated webhook endpoints that reconcile the transaction state without requiring the user
+to remain on the page.
 
 % =============================================================================
 % 4.3 DATABASE SCHEMA DESIGN
@@ -114,8 +138,12 @@ endpoints handle asynchronous gateway notifications.
 
 \justifying
 The BondHealth platform utilizes Neon PostgreSQL, providing automatic scaling, high
-availability, and connection pooling. The schema uses UUID primary keys, array data types,
-and comprehensive foreign key constraints.
+availability, and connection pooling. The schema is the authoritative definition of all data
+the system stores and the relationships between those data. Every design decision in the
+schema — from key types to constraint styles to timestamp conventions — has been made to
+support the platform's clinical workflows reliably while remaining maintainable as the
+system evolves. The schema uses UUID primary keys, array data types, and comprehensive
+foreign key constraints.
 
 % CHANGE 2: ER Diagram figure placed first
 \begin{figure}[ht]
@@ -197,6 +225,30 @@ change as an incremental script across development, staging, and production envi
 New hospitals are provisioned without structural changes --- seed scripts initialise default
 roles, department categories, and configuration records for each facility.
 
+\justifying
+\noindent
+The schema comprises ten core tables, each scoped to a distinct domain of the platform.
+The \texttt{users} and \texttt{hospitals} tables form the two anchoring entities from which
+all other tables derive their identity and organisational context. Clinical output tables
+such as \texttt{lab\_reports} and \texttt{prescriptions} depend on both a patient and a
+doctor reference, reflecting the bilateral nature of medical record ownership. Operational
+tables such as \texttt{doctor\_leave}, \texttt{medicines}, and \texttt{payments} each serve
+a narrower purpose but are equally critical to the platform's day-to-day workflows.
+Together, these ten tables cover every data entity required by the four user roles without
+redundancy, and their relationships have been designed to make the most common read queries
+--- patient history, doctor availability, appointment lookup --- executable with a minimal
+number of joins.
+
+\justifying
+\noindent
+Each table follows a consistent internal convention. Every row is identified by a UUID
+primary key generated at the database level, every table carries \texttt{created\_at} and
+\texttt{updated\_at} timestamp columns for audit traceability, and every foreign key
+relationship is accompanied by an explicit constraint with a deliberate cascade or restrict
+rule. Status and role fields use \texttt{CHECK}-constrained string values rather than
+numeric codes, so that the contents of any row are self-explanatory when inspected directly
+in the database. 
+
 \noindent
 The following table provides a concise summary of each core table, its purpose, and
 its primary fields as implemented in the Neon PostgreSQL schema.
@@ -255,26 +307,21 @@ its primary fields as implemented in the Neon PostgreSQL schema.
 \end{table}
 
 \vspace{0.3cm}
-\textbf{Database Indexes for Performance Optimization:}
-
-\begin{itemize}
-    \item \texttt{CREATE INDEX idx\_users\_email ON users(email);} -- Accelerates login
-    and user lookup by email.
-    \item \texttt{CREATE INDEX idx\_users\_username ON users(username);} -- Speeds up
-    login by username.
-    \item \texttt{CREATE INDEX idx\_patients\_user\_id ON patients(user\_id);} -- Fast
-    patient profile access from user ID.
-    \item \texttt{CREATE INDEX idx\_doctors\_hospital\_id ON doctors(hospital\_id);} --
-    Quick doctor lookup by hospital.
-    \item \texttt{CREATE INDEX idx\_doctors\_specialization ON doctors(specialization);} --
-    Enables fast doctor filtering by specialty.
-    \item \texttt{CREATE INDEX idx\_appointments\_patient\_id ON appointments(patient\_id);}
-    -- Rapid retrieval of patient appointment history.
-    \item \texttt{CREATE INDEX idx\_appointments\_doctor\_id ON appointments(doctor\_id);}
-    -- Fast doctor schedule access.
-    \item \texttt{CREATE INDEX idx\_appointments\_date ON appointments(appointment\_date);}
-    -- Optimizes date-based queries.
-\end{itemize}
+\noindent
+\textbf{Database Indexes for Performance Optimization.}
+Strategic indexes are applied to the columns most frequently used in \texttt{WHERE} clauses,
+join conditions, and sort operations. \texttt{CREATE INDEX idx\_users\_email ON users(email)}
+and \texttt{CREATE INDEX idx\_users\_username ON users(username)} accelerate login and user
+lookup operations. \texttt{CREATE INDEX idx\_patients\_user\_id ON patients(user\_id)} enables
+fast patient profile retrieval from a user identifier, while
+\texttt{CREATE INDEX idx\_doctors\_hospital\_id ON doctors(hospital\_id)} and
+\texttt{CREATE INDEX idx\_doctors\_specialization ON doctors(specialization)} support rapid
+doctor discovery by facility and clinical specialty respectively. On the appointments side,
+\texttt{CREATE INDEX idx\_appointments\_patient\_id ON appointments(patient\_id)},
+\texttt{CREATE INDEX idx\_appointments\_doctor\_id ON appointments(doctor\_id)}, and
+\texttt{CREATE INDEX idx\_appointments\_date ON appointments(appointment\_date)} together
+ensure that retrieving a patient's history, a doctor's schedule, and date-range queries
+all execute without full table scans.
 
 % =============================================================================
 % 4.4 API DESIGN
@@ -312,6 +359,9 @@ meaningful feedback to users without additional parsing logic. All endpoints ret
 HTTP status codes: \texttt{200} for successful retrieval, \texttt{201} for resource creation,
 \texttt{400} for validation failures, \texttt{401} for unauthenticated requests, \texttt{403}
 for authorisation violations, and \texttt{404} when a requested resource does not exist.
+This uniformity means that the frontend can apply a single error-handling interceptor across
+all API calls rather than implementing bespoke handling per endpoint, keeping the client-side
+codebase lean and reducing the surface area for inconsistent user-facing error messages.
 
 \noindent
 The API also enforces per-user and per-IP rate limiting on sensitive endpoints such as login,
@@ -319,7 +369,15 @@ registration, and payment initiation, reducing exposure to brute-force and denia
 attacks. For endpoints that trigger background operations --- such as appointment confirmation
 and lab report notification --- responses are returned immediately with a \texttt{202 Accepted}
 status while the background task completes asynchronously, keeping perceived response times
-low under load.
+low under load. This distinction between synchronous and asynchronous response patterns is
+applied deliberately: only operations whose background tasks are non-critical to the immediate
+user action are deferred, while operations such as appointment slot locking and payment intent
+creation remain fully synchronous to guarantee that the user receives a definitive outcome
+before leaving the page. Taken together, the consistent status code semantics, structured
+error envelopes, and mixed synchrony model give the API a predictable contract that both
+the server-rendered EJS templates and any future client applications can depend on without
+requiring changes to the underlying endpoint logic. The table below lists the core endpoints
+along with their access requirements.
 
 \begin{table}[H]
     \small
@@ -384,62 +442,91 @@ low under load.
 
 \justifying
 This section provides design specifications for each major module of the BondHealth platform,
-describing their component structure and interactions with other modules.
+describing their component structure and interactions with other modules. Each module encapsulates
+a coherent set of responsibilities and exposes a well-defined interface to the rest of the system,
+making it possible to develop, test, and evolve individual modules independently. The six modules
+covered here are Authentication, the Patient Dashboard, the Doctor Dashboard, the Admin Dashboard,
+the Lab Technician interface, and Appointment Booking.
 
 \subsection{Authentication Module}
 
 \justifying
 The authentication module is the security gateway for the platform, responsible for verifying
-user identities, managing sessions, and enforcing access controls. Core components include:
-a JWT Token Service generating tokens signed with HS256 expiring after 7 days; HTTP-only
-cookie management with \texttt{HttpOnly}, \texttt{Secure}, and \texttt{SameSite=Strict} flags;
-a server-side session store backed by Redis; a password hashing service using bcrypt with 10
-salt rounds; and RBAC middleware implementing the principle of least privilege.
+user identities, managing sessions, and enforcing access controls. At its core, a JWT Token
+Service generates tokens signed with HS256 that expire after seven days; these tokens are
+delivered exclusively through HTTP-only cookies carrying \texttt{HttpOnly}, \texttt{Secure},
+and \texttt{SameSite=Strict} flags, making them inaccessible to client-side JavaScript and
+resistant to cross-site request forgery. Server-side session state is maintained in a Redis
+store, enabling instant revocation without waiting for token expiry. Passwords are hashed
+with bcrypt using ten salt rounds before storage, and RBAC middleware enforces the principle
+of least privilege on every protected route by comparing the authenticated user's role against
+the permissions required by the requested resource.
 
 \subsection{Patient Dashboard Module}
 
 \justifying
 The patient dashboard provides a unified interface for managing all aspects of a patient's
 healthcare journey. It dynamically loads only data relevant to the logged-in patient and
-highlights pending actions such as unpaid bills, upcoming appointments, and new lab reports.
-Components include a Profile Summary Card, Upcoming and Past Appointments sections,
-a tabbed Medical Records section, Prescription Management, Quick Action Buttons, and a
-Notification Center with read/unread status.
+highlights pending actions such as unpaid bills, upcoming appointments, and new lab reports,
+ensuring that time-sensitive items are immediately visible without requiring the patient to
+navigate across multiple pages. The dashboard is composed of a Profile Summary Card, an
+Upcoming Appointments section, a Past Appointments section, a tabbed Medical Records panel,
+a Prescription Management view, Quick Action Buttons for the most common tasks, and a
+Notification Center that distinguishes between read and unread items to help patients manage
+their follow-up actions efficiently.
 
 \subsection{Doctor Dashboard Module}
 
 \justifying
-The doctor dashboard is designed for clinical workflow efficiency. Components include a
-Dashboard Header with quick stats and status toggle, a Today's Schedule Component with
-action buttons per appointment, a searchable Patient List Sidebar, a priority-based Lab
-Reports Queue, a Prescription Writing Interface with drug interaction checking, and a
-Leave Management Widget.
+The doctor dashboard is designed for clinical workflow efficiency, surfacing the information
+and controls a clinician needs within a single view. A Dashboard Header displays quick
+statistics and a status toggle that allows the doctor to mark themselves as available or
+unavailable. Today's Schedule presents each appointment with contextual action buttons,
+while a searchable Patient List Sidebar allows rapid access to any patient record. A
+priority-based Lab Reports Queue ensures that critical results are reviewed first. The
+Prescription Writing Interface incorporates drug interaction checking to support safe
+prescribing, and a Leave Management Widget allows doctors to submit and track leave
+applications without leaving the dashboard.
 
 \subsection{Admin Dashboard Module}
 
 \justifying
 The admin dashboard provides hospital administrators with tools for managing facility
-operations. Components include Statistics Cards, a Quick Action Cards Grid, a Doctor
-Management Interface with inline editing, a Medicine Inventory Management panel with
-low-stock alerts and expiry tracking, a Lab Technician Management list, and a Leave
-Approval Workflow with calendar view.
+operations across all clinical and administrative functions. Statistics Cards give a
+real-time overview of key performance indicators, and a Quick Action Cards Grid exposes
+the most common administrative tasks in a single click. A Doctor Management Interface
+supports inline editing of doctor profiles and schedules, while a Medicine Inventory
+Management panel provides visibility into stock levels, surfaces low-stock alerts, and
+tracks expiry dates to prevent medication shortages. A Lab Technician Management list
+allows administrators to onboard and manage laboratory staff, and a Leave Approval
+Workflow with calendar view enables efficient review and disposition of leave requests.
 
 \subsection{Lab Technician Module}
 
 \justifying
 The laboratory technician module streamlines test processing from patient identification
-through result entry to report submission. Components include a multi-step Send Report Form,
-a searchable Patient History Table, a Statistics Dashboard showing daily counts and turnaround
-times, and a Quality Control Panel for equipment status and reagent lot management.
+through result entry to report submission. A multi-step Send Report Form guides the
+technician through each stage of the reporting process, reducing the likelihood of
+incomplete submissions. A searchable Patient History Table gives technicians immediate
+access to prior results for the same patient, supporting trend analysis and anomaly
+detection. A Statistics Dashboard displays daily report counts and turnaround times,
+helping laboratory supervisors monitor throughput against service-level targets. A Quality
+Control Panel tracks equipment status and reagent lot information, ensuring that results
+are always produced under validated conditions.
 
 \subsection{Appointment Booking Module}
 
 \justifying
 The appointment booking module provides an intuitive interface for finding and scheduling
-appointments. Components include a Doctor Search Interface with autocomplete and advanced
-filters, a tabbed Doctor Profile View, an Availability Calendar with color-coded slots,
-a real-time Time Slot Selection grid with slot locking, a Booking Form for symptoms and
-insurance details, and a Confirmation Modal with payment processing and calendar integration.
+appointments. A Doctor Search Interface with autocomplete and advanced filters allows
+patients to narrow candidates by specialization, location, language, and availability. A
+tabbed Doctor Profile View presents qualifications, reviews, and fee information in an
+organized layout. An Availability Calendar uses color-coded slots to communicate at a
+glance which times are open, and a real-time Time Slot Selection grid locks the selected
+slot during the booking process to prevent concurrent bookings of the same time. A Booking
+Form captures symptoms and insurance details before the patient proceeds to payment, and a
+Confirmation Modal handles payment processing and offers calendar integration so the
+appointment is automatically added to the patient's personal calendar.
 
 % =============================================================================
 % 4.6 SECURITY ARCHITECTURE
@@ -448,9 +535,13 @@ insurance details, and a Confirmation Modal with payment processing and calendar
 
 \justifying
 The BondHealth platform implements a defense-in-depth security architecture embedded at every
-layer of the system. Core principles include Defense in Depth, Least Privilege, Secure by
-Default, and Complete Mediation — ensuring every access attempt is authenticated, authorised,
-and logged regardless of how a resource is reached.
+layer of the system. The guiding principles are Defense in Depth, Least Privilege, Secure by
+Default, and Complete Mediation, which together ensure that every access attempt is
+authenticated, authorised, and logged regardless of the path by which a resource is reached.
+Rather than relying on a single perimeter control, security measures are applied at the
+network boundary, the application layer, the database tier, and the file storage layer
+simultaneously, so that the compromise of any one control does not expose the system as a
+whole. The table below summarises the security measures implemented at each layer.
 
 \begin{table}[H]
     \small
@@ -503,38 +594,41 @@ and logged regardless of how a resource is reached.
 
 \subsection{Data Encryption}
 
-\textbf{Encryption at Rest:}
-\begin{itemize}
-    \item Database: Transparent Data Encryption (TDE) at storage level with AES-256.
-    \item Sensitive fields (PII, medical data): Application-level encryption with
-    AES-256-GCM.
-    \item File storage: Server-side encryption with AWS KMS/Azure Key Vault.
-\end{itemize}
+\justifying
+Data at rest is protected at multiple levels. At the storage layer, Transparent Data
+Encryption (TDE) with AES-256 ensures that database files on disk are unreadable without
+the appropriate key. Sensitive fields containing personally identifiable information and
+medical data receive an additional layer of application-level encryption using AES-256-GCM
+before they are written to the database, so that even a privileged database user cannot read
+the raw values. Files uploaded to object storage are encrypted server-side using AWS KMS or
+Azure Key Vault, depending on the deployment environment.
 
-\textbf{Encryption in Transit:}
-\begin{itemize}
-    \item TLS 1.3 minimum for all external communications.
-    \item Database connections: TLS with certificate validation.
-    \item API endpoints: HSTS preload with perfect forward secrecy.
-\end{itemize}
+\noindent
+\justifying
+Data in transit is equally protected. All external communications require TLS 1.3 as a
+minimum, and database connections enforce TLS with full certificate validation to guard
+against man-in-the-middle attacks. Every API endpoint is served with HTTP Strict Transport
+Security preload headers and is configured for perfect forward secrecy, ensuring that the
+compromise of a long-term private key cannot be used to decrypt previously recorded
+sessions.
 
 \subsection{Compliance and Audit}
 
-\textbf{HIPAA Compliance:}
-\begin{itemize}
-    \item Access controls and audit trails for all PHI.
-    \item Encryption of PHI at rest and in transit.
-    \item Breach notification procedures within 72 hours.
-    \item Automatic logout after 15 minutes of inactivity.
-\end{itemize}
+\justifying
+The platform is designed to satisfy HIPAA requirements for the protection of protected health
+information (PHI). Access controls and audit trails cover all PHI, and all such data is
+encrypted both at rest and in transit as described above. In the event of a breach, procedures
+are in place to notify affected parties within 72 hours. Sessions are automatically terminated
+after 15 minutes of inactivity to reduce the risk of unauthorized access on unattended devices.
 
-\textbf{Audit Logging:}
-\begin{itemize}
-    \item Log all authentication attempts with IP and user agent.
-    \item Log all access to PHI with patient ID and record type.
-    \item Log all data modifications with before/after values.
-    \item 7-year log retention for compliance.
-\end{itemize}
+\noindent
+\justifying
+All security-relevant events are written to an immutable audit log. Authentication attempts,
+including failures, are recorded with the originating IP address and user agent. Every access
+to a PHI record is logged with the patient identifier and the type of record accessed. Data
+modifications capture both the before and after values to support forensic reconstruction of
+any change. Log records are retained for seven years to satisfy regulatory requirements across
+all applicable jurisdictions.
 
 % =============================================================================
 % 4.7 DATABASE CONNECTION DESIGN
@@ -544,32 +638,25 @@ and logged regardless of how a resource is reached.
 
 \justifying
 The database connection architecture is designed for optimal performance, reliability,
-and security when connecting the Node.js application layer to Neon PostgreSQL.
+and security when connecting the Node.js application layer to Neon PostgreSQL. Because each
+incoming HTTP request may require several database queries, managing connections efficiently
+is critical to sustaining acceptable response times under load. The architecture addresses
+this through connection pooling, strict SSL configuration, and disciplined credential
+management.
 
 \subsection{Connection Pooling Architecture}
 
 \justifying
 Connection pooling maintains a cache of reusable database connections, eliminating the
-overhead of a full TCP handshake per request. The pool maintains a configurable minimum
-of ready connections to handle sudden traffic spikes gracefully, and automatically detects
-and replaces failed or stale connections without manual intervention.
-
-\textbf{Pool Configuration:}
-\begin{itemize}
-    \item \textbf{Min Pool Size}: 5 connections to handle sudden spikes.
-    \item \textbf{Max Pool Size}: 20 connections to limit database load.
-    \item \textbf{Connection Timeout}: 10 seconds to wait for a connection.
-    \item \textbf{Idle Timeout}: 30 seconds to close idle connections.
-    \item \textbf{Max Lifetime}: 30 minutes to recycle stale connections.
-\end{itemize}
-
-\textbf{Pool Benefits:}
-\begin{itemize}
-    \item Reduced latency (no connection setup overhead).
-    \item Better resource utilization (controlled number of connections).
-    \item Automatic recovery (replaces failed connections).
-    \item Load smoothing (handles traffic spikes gracefully).
-\end{itemize}
+overhead of a full TCP handshake per request. The pool maintains a configurable minimum of
+ready connections to handle sudden traffic spikes gracefully, and automatically detects and
+replaces failed or stale connections without manual intervention. The pool is configured with
+a minimum size of 5 connections to absorb sudden spikes, a maximum size of 20 connections to
+limit load on the database server, a connection timeout of 10 seconds, an idle timeout of
+30 seconds after which unused connections are released, and a maximum connection lifetime of
+30 minutes to ensure stale connections are periodically recycled. Together these settings
+reduce latency, improve resource utilization, provide automatic recovery from transient
+failures, and smooth out the effects of bursty traffic patterns.
 
 \begin{lstlisting}[language=JavaScript,
     caption={Database Connection Configuration (config/database.js)},
@@ -605,19 +692,27 @@ const query = async (text, params) => {
 
 \subsection{Connection Security}
 
-\textbf{SSL/TLS Configuration:}
-\begin{itemize}
-    \item SSL mode: \texttt{require} (enforces encryption).
-    \item Certificate validation: Enabled (prevents MITM attacks).
-    \item Minimum TLS version: TLSv1.2.
-\end{itemize}
+\justifying
+All connections to Neon PostgreSQL are established with SSL mode set to \texttt{require},
+which prevents any unencrypted connection from succeeding. Certificate validation is enabled
+on the client side to protect against man-in-the-middle attacks, and the minimum acceptable
+TLS version is TLSv1.2. The database connection string is stored exclusively in environment
+variables and is never committed to version control. Credentials are rotated on a quarterly
+schedule and immediately after any security incident, limiting the window of exposure in the
+event that a credential is compromised.
 
-\textbf{Credential Management:}
-\begin{itemize}
-    \item Connection string stored in environment variables.
-    \item Never committed to version control.
-    \item Rotated quarterly or after any security incident.
-\end{itemize}
+\justifying
+\noindent
+Beyond transport-level protection, the application connects to the database using a
+dedicated service account granted only the privileges required by the application's query
+set — namely \texttt{SELECT}, \texttt{INSERT}, \texttt{UPDATE}, and \texttt{DELETE} on
+the relevant tables, with no \texttt{DDL} privileges. This ensures that even if the
+application-layer credentials were obtained by an attacker, they could not be used to
+alter the schema, drop tables, or escalate access within the database. Query parameters
+are always passed separately from the SQL statement text, so the database driver handles
+escaping independently of application code, eliminating an entire class of injection
+vulnerability at the connection level rather than relying solely on application-layer
+validation.
 
 % =============================================================================
 % 4.8 THIRD-PARTY INTEGRATIONS
@@ -628,8 +723,15 @@ const query = async (text, params) => {
 \justifying
 The BondHealth platform integrates with multiple external services to extend functionality
 while keeping development focused on core healthcare features. All integrations communicate
-over HTTPS with credentials stored exclusively in environment variables. The table below
-summarizes each integration, its purpose, and key implementation details.
+over HTTPS with credentials stored exclusively in environment variables, and each integration
+is abstracted behind a thin service wrapper so that the underlying provider can be swapped
+without changes to the calling code. Where an external service supports webhook delivery,
+the platform registers a dedicated endpoint to receive asynchronous event notifications,
+decoupling the user-facing response from the outcome of the background operation. Each
+integration is also subject to the same error handling and retry conventions as internal
+modules, so that a transient failure in a third-party service degrades gracefully rather
+than propagating an unhandled exception to the user. The table below summarizes each
+integration, its purpose, and key implementation details.
 
 \begin{table}[H]
     \small
@@ -683,45 +785,50 @@ summarizes each integration, its purpose, and key implementation details.
 \section{Performance Optimization}
 
 \justifying
-The BondHealth platform implements multiple optimization strategies to ensure responsive
-user experiences under high load.
+The BondHealth platform implements multiple optimization strategies across all layers of the
+stack to ensure responsive user experiences under high load. These strategies address four
+complementary areas: database query performance, in-memory caching, API and frontend delivery,
+and infrastructure-level scaling and monitoring.
 
-\textbf{Database Optimization:}
-\begin{itemize}
-    \item Strategic indexing on frequently queried columns reduces query execution times.
-    \item Connection pooling minimizes database connection overhead.
-    \item Query optimization through EXPLAIN analysis and index tuning.
-    \item Read replicas for reporting queries to offload the primary database.
-    \item Partitioning for large tables (appointments by date, logs by month).
-\end{itemize}
+\justifying
+\noindent
+At the database level, strategic indexing on frequently queried columns reduces query execution
+times significantly, and connection pooling eliminates per-request connection overhead as
+described in Section~4.7. Query plans are analyzed using \texttt{EXPLAIN} to identify missing
+indexes or suboptimal join strategies, and reporting queries are routed to read replicas to
+offload the primary database. Large tables such as appointments and logs are partitioned by date
+and month respectively, keeping individual partition sizes manageable as data accumulates over
+time.
 
-\textbf{Caching Strategy:}
-\begin{itemize}
-    \item Redis caching for frequently accessed data such as doctor lists and hospital info.
-    \item Session data stored in Redis for sub-millisecond access.
-    \item Response caching for public endpoints with CDN.
-    \item Database query caching for expensive but static queries.
-\end{itemize}
+\justifying
+\noindent
+Caching is implemented using Redis at multiple levels. Frequently read but slowly changing
+data --- such as doctor lists and hospital information --- is cached in Redis with a
+configurable TTL, while session data is stored in Redis for sub-millisecond access on every
+authenticated request. Public endpoints benefit from response caching served through a CDN,
+and the results of expensive but stable database queries are cached to prevent redundant
+computation on repeated calls.
 
-\textbf{API \& Frontend Optimization:}
-\begin{itemize}
-    \item Pagination for all list endpoints ensuring manageable response sizes.
-    \item Compression (gzip/brotli) reduces API response bandwidth by 70--80\%.
-    \item HTTP/2 multiplexing for parallel requests and batch endpoints for mobile clients.
-    \item Lazy loading for images, code splitting for JS bundles, and CDN for static assets.
-    \item Service workers for offline capability and client-side caching.
-\end{itemize}
+\justifying
+\noindent
+At the API and frontend layer, all list endpoints use pagination to keep response payloads
+within predictable bounds. Gzip and Brotli compression reduce response sizes by 70 to 80
+percent, and HTTP/2 multiplexing allows the browser to issue parallel requests over a single
+connection. A batch endpoint is provided for mobile clients that need to retrieve multiple
+resources in a single round trip. On the frontend, images are lazy-loaded, JavaScript bundles
+are code-split to avoid shipping unused code, and static assets are served from a CDN. A
+service worker enables offline capability and client-side caching of recently viewed data.
 
-\textbf{Infrastructure Scaling \& Monitoring:}
-\begin{itemize}
-    \item Horizontal scaling through stateless application design with NGINX load balancing.
-    \item Auto-scaling groups based on CPU and memory metrics.
-    \item CDN for static assets reduces origin load by 90\%.
-    \item Real-time performance monitoring with DataDog/New Relic; alerting on p95 latency
-    exceeding 500ms.
-    \item Synthetic monitoring for critical user journeys and log aggregation for slow query
-    analysis.
-\end{itemize}
+\justifying
+\noindent
+At the infrastructure level, the application is designed to be stateless, allowing horizontal
+scaling behind an NGINX load balancer without session affinity requirements. Auto-scaling groups
+respond to CPU and memory metrics to add or remove instances as demand fluctuates. A CDN in
+front of static assets reduces origin load by approximately 90 percent. Real-time performance
+monitoring via DataDog or New Relic triggers alerts when the 95th-percentile latency exceeds
+500 milliseconds, and synthetic monitoring continuously exercises critical user journeys to
+detect regressions before real users are affected. Log aggregation pipelines surface slow query
+patterns for ongoing tuning.
 
 % =============================================================================
 % 4.10 SUMMARY

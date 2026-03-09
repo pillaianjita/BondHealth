@@ -30,7 +30,7 @@ The project runs on Node.js (v20 LTS) with the Express.js framework. The databas
 \end{table}
 
 \noindent
-The entry point \texttt{server.js} registers middleware (body parsing, cookie parsing, static files), mounts the route modules, and starts the HTTP server. Socket.io is attached to the same server instance so that WebSocket upgrade requests share the same port as REST traffic.
+The entry point \texttt{server.js} registers middleware (body parsing, cookie parsing, static files), mounts the route modules, and starts the HTTP server. Socket.io is attached to the same server instance so that WebSocket upgrade requests share the same port as REST traffic. Environment variables are validated at startup so that a missing or malformed configuration value causes the process to exit with a descriptive error immediately, rather than surfacing as a runtime failure during the first affected request.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Authentication Implementation}
@@ -39,7 +39,7 @@ The entry point \texttt{server.js} registers middleware (body parsing, cookie pa
 All authentication logic resides in \texttt{routes/auth.js}. Registration accepts a role parameter (\texttt{patient}, \texttt{doctor}, \texttt{admin}, or \texttt{lab}); passwords are hashed with \texttt{bcrypt} at a work factor of 12 before storage. On successful login, the server generates a signed JWT containing the user's ID, email, and role, written into an HTTP-only cookie with \texttt{Secure} and \texttt{SameSite=Strict} attributes to prevent client-side access and cross-site request forgery.
 
 \noindent
-Subsequent requests are authenticated by the \texttt{verifyToken} middleware, which reads the cookie, verifies the signature, and attaches the decoded payload to \texttt{req.user}. Role-specific guards (\texttt{requirePatient}, \texttt{requireDoctor}, \texttt{requireAdmin}, \texttt{requireLab}) wrap \texttt{verifyToken} and additionally compare \texttt{req.user.role} against the expected value, returning 403 on mismatch. The login and registration page, shown in Figure~\ref{fig:login}, presents a role selector that updates the form dynamically without a page reload.
+Subsequent requests are authenticated by the \texttt{verifyToken} middleware, which reads the cookie, verifies the signature, and attaches the decoded payload to \texttt{req.user}. Role-specific guards (\texttt{requirePatient}, \texttt{requireDoctor}, \texttt{requireAdmin}, \texttt{requireLab}) wrap \texttt{verifyToken} and additionally compare \texttt{req.user.role} against the expected value, returning 403 on mismatch. Failed login attempts beyond a configurable threshold trigger a temporary account lockout, recorded against the user record, to limit the effectiveness of credential-stuffing attacks. The logout route clears the HTTP-only cookie and invalidates the server-side session entry in Redis, ensuring that a stolen cookie cannot be replayed after the user has signed out. The login and registration page, shown in Figure~\ref{fig:login}, presents a role selector that updates the form dynamically without a page reload.
 
 \begin{figure}[ht]
 \centering
@@ -52,10 +52,41 @@ Subsequent requests are authenticated by the \texttt{verifyToken} middleware, wh
 \section{Patient Module Implementation}
 \label{sec:patient}
 
+The patient module covers the full scope of functionality available to a registered patient,
+from viewing and managing appointments through to accessing clinical records and maintaining
+profile information. All routes in this module are protected by the \texttt{requirePatient}
+guard, ensuring that only authenticated users with the \texttt{patient} role can reach them.
+The subsections below describe each functional area in turn.
+
+\noindent
+The module is organised within \texttt{routes/patient/} and split across several focused
+route files, each responsible for a single functional domain. This separation keeps
+individual files short and ensures that changes to, for example, the prescription viewing
+logic do not risk introducing regressions in the appointment booking flow. All route
+handlers follow the same pattern: the incoming request is validated, one or more
+parameterised database queries are executed through the shared \texttt{db/index.js} helper,
+and the results are forwarded to the appropriate EJS template as named variables. Where an
+operation modifies data --- such as booking an appointment or updating profile details ---
+the handler performs server-side validation before issuing any database write, regardless
+of whether client-side validation has already run, ensuring that the data layer is never
+reached with an invalid payload. Errors thrown during query execution are caught centrally
+and forwarded to the application's error-handling middleware, which renders a consistent
+error page rather than exposing internal stack traces to the user.
+
 \subsection{Patient Dashboard}
 \label{subsec:patient-dashboard}
 
-The patient dashboard is rendered server-side by the \texttt{GET /patient/dashboard} route, which executes three parallel queries: upcoming appointments (joined with doctor name and specialisation), the most recent prescription summary, and any pending lab reports. Results are passed as template variables to the EJS view, which assembles the profile summary card, appointments list, and quick action buttons. Figure~\ref{fig:dashboard-patient} shows the rendered dashboard.
+The patient dashboard is rendered server-side by the \texttt{GET /patient/dashboard} route,
+which executes three parallel queries: upcoming appointments (joined with doctor name and
+specialisation), the most recent prescription summary, and any pending lab reports. Results
+are passed as template variables to the EJS view, which assembles the profile summary card,
+appointments list, and quick action buttons. The parallel query strategy ensures that the
+total server-side rendering time is bounded by the slowest individual query rather than the
+sum of all three, keeping dashboard load times acceptable even as each underlying dataset
+grows independently. Appointments are ordered by date and time ascending so that the most
+imminent consultation appears at the top of the list, and any appointment scheduled within
+the next 24 hours is highlighted visually to draw the patient's attention to time-sensitive
+actions such as confirming attendance or completing pending payment. Figure~\ref{fig:dashboard-patient} shows the rendered dashboard.
 
 \begin{figure}[ht]
 \centering
@@ -64,13 +95,37 @@ The patient dashboard is rendered server-side by the \texttt{GET /patient/dashbo
 \label{fig:dashboard-patient}
 \end{figure}
 
-
-
-
 \subsection{Appointment Booking Flow}
 \label{subsec:appt-booking}
 
-Appointment booking proceeds through three sequential steps managed by \texttt{routes/patient/appointments.js}. In Step 1, the patient submits a specialisation or name fragment queried against the \texttt{doctors} table with an \texttt{ILIKE} filter. In Step 2, the route fetches the doctor's weekly availability, subtracts already-booked slots and approved leave periods, and renders the remaining free slots as a date-and-time grid. In Step 3, the selected slot is submitted to a \texttt{POST} handler that opens a database transaction, inserts a row into \texttt{appointments} with status \texttt{pending\_payment}, and commits only after payment succeeds (see Section~\ref{sec:payment}). Figure~\ref{fig:appt-booking} shows the booking interface.
+Appointment booking proceeds through three sequential steps managed by
+\texttt{routes/patient/appointments.js}. In Step 1, the patient submits a specialisation
+or name fragment queried against the \texttt{doctors} table with an \texttt{ILIKE} filter.
+In Step 2, the route fetches the doctor's weekly availability, subtracts already-booked
+slots and approved leave periods, and renders the remaining free slots as a date-and-time
+grid. In Step 3, the selected slot is submitted to a \texttt{POST} handler that opens a
+database transaction, inserts a row into \texttt{appointments} with status
+\texttt{pending\_payment}, and commits only after payment succeeds (see
+Section~\ref{sec:payment}). Figure~\ref{fig:appt-booking} shows the booking interface.
+
+\noindent
+The three-step structure is enforced server-side as well as in the interface, so that a
+patient cannot reach Step 3 by manipulating the URL directly without having completed the
+preceding steps. Each step stores its intermediate state in the session, meaning that a
+page refresh at any point does not lose the patient's progress or require them to restart
+the search. The doctor search in Step 1 returns a result set ordered by rating and earliest
+available slot, giving patients the most actionable options at the top of the list without
+requiring additional filtering. In Step 2, slots that fall within the next two hours are
+excluded from the grid to give doctors adequate notice before a consultation begins, and
+any slot that another patient is currently in the process of booking is displayed as
+temporarily unavailable to reduce the likelihood of a transaction conflict reaching Step 3.
+
+\noindent
+If the transaction in Step 3 does encounter a conflict --- for instance, because two
+patients completed the booking flow for the same slot within the same window --- the
+handler rolls back cleanly and returns the patient to the slot selection grid with an
+inline message indicating that the chosen time is no longer available, prompting them to
+select an alternative without losing the doctor selection made in Step 1.
 
 \begin{figure}[ht]
 \centering
@@ -82,18 +137,56 @@ Appointment booking proceeds through three sequential steps managed by \texttt{r
 \subsection{Prescription and Lab Report Viewing}
 \label{subsec:patient-records}
 
-Prescriptions are retrieved via a join between \texttt{prescriptions}, \texttt{prescription\_items}, and \texttt{medicines}, listing each medicine with its dosage, frequency, and duration. Lab reports are retrieved from \texttt{lab\_reports} filtered by \texttt{patient\_id}; the patient can download any attached file whose \texttt{shared} flag is set to true by the lab technician.
+Prescriptions are retrieved via a join between \texttt{prescriptions},
+\texttt{prescription\_items}, and \texttt{medicines}, listing each medicine with its
+dosage, frequency, and duration. Lab reports are retrieved from \texttt{lab\_reports}
+filtered by \texttt{patient\_id}; the patient can download any attached file whose
+\texttt{shared} flag is set to true by the lab technician.
+
+\noindent
+Prescriptions are displayed in reverse chronological order so that the most recent
+consultation's medications appear first, reducing the need for the patient to scroll
+through historical records during an active treatment period. Each prescription entry
+also surfaces the issuing doctor's name and the date of the associated appointment,
+giving the patient sufficient context to relate a prescription to a specific consultation
+without needing to navigate away to the appointments view. For lab reports, the interface
+distinguishes between reports that have been shared by the technician and those that are
+still pending sharing, displaying the latter as placeholders so the patient is aware a
+result exists without being able to access it prematurely. Where a report includes an
+attached file, the download link resolves to a signed URL with a short expiry window
+rather than a direct path, preventing unauthorised access to the file even if the link
+is shared outside the platform.
 
 \subsection{Profile Management}
 \label{subsec:patient-profile}
 
-The patient profile page allows updating of contact details, emergency contact, and blood group. The \texttt{POST /patient/profile} handler validates field lengths and formats, then issues an \texttt{UPDATE} on the \texttt{patients} table. Password changes require the current password to be verified with \texttt{bcrypt.compare} before the new hash is stored.
+The patient profile page allows updating of contact details, emergency contact, and blood
+group. The \texttt{POST /patient/profile} handler validates field lengths and formats,
+then issues an \texttt{UPDATE} on the \texttt{patients} table. Password changes require
+the current password to be verified with \texttt{bcrypt.compare} before the new hash
+is stored.
+
+\noindent
+Field-level validation on the profile form is applied both client-side for immediate
+feedback and server-side before any database write is issued, following the same dual
+validation pattern used throughout the patient module. Phone number and email fields
+are checked against format constraints, and the emergency contact section requires both
+a name and a contact number to be present together or absent together, preventing a
+partially filled emergency record from being saved. The profile page also displays the
+patient's registered role and account creation date as read-only fields, giving the
+patient a clear view of their account state without exposing any sensitive system
+identifiers. All profile updates are recorded with an updated \texttt{updated\_at}
+timestamp, ensuring the audit trail reflects the most recent modification even when
+the change is minor.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Doctor Module Implementation}
 \label{sec:doctor}
 
-The doctor dashboard, shown in Figure~\ref{fig:dashboard-doctor}, is rendered by \texttt{GET /doctor/dashboard}, fetching today's appointments ordered by time, the count of lab reports awaiting review, and a side-panel patient list for the current week.
+The doctor module provides clinicians with tools to manage their daily schedule, conduct consultations, write prescriptions, review laboratory results, and request leave. Routes are protected by the \texttt{requireDoctor} guard and are organised within \texttt{routes/doctor/}. The dashboard serves as the central entry point, with dedicated subsections handling each clinical workflow.
+
+\noindent
+The doctor dashboard, shown in Figure~\ref{fig:dashboard-doctor}, is rendered by \texttt{GET /doctor/dashboard}, fetching today's appointments ordered by time, the count of lab reports awaiting review, and a side-panel patient list for the current week. The dashboard is intentionally designed to surface only the information relevant to the current working day, avoiding information overload while still providing quick-access counts that alert the doctor to items requiring attention outside the immediate schedule.
 
 \begin{figure}[ht]
 \centering
@@ -105,28 +198,66 @@ The doctor dashboard, shown in Figure~\ref{fig:dashboard-doctor}, is rendered by
 \subsection{Patient Consultation View}
 \label{subsec:consultation}
 
-Selecting an appointment opens the consultation view at \texttt{GET /doctor/appointment/:id}, which joins \texttt{appointments} with \texttt{patients} and loads any previous prescriptions for that patient. The doctor can add notes saved to the \texttt{appointments.doctor\_notes} column.
+Selecting an appointment opens the consultation view at \texttt{GET /doctor/appointment/:id},
+which joins \texttt{appointments} with \texttt{patients} and loads any previous prescriptions
+for that patient. The doctor can add notes saved to the \texttt{appointments.doctor\_notes}
+column. Previous prescriptions are displayed in a collapsible panel ordered by date, allowing
+the doctor to review the patient's medication history without leaving the consultation view.
+The route validates that the appointment belongs to the authenticated doctor before returning
+any data, ensuring that a doctor cannot access consultation details for appointments assigned
+to a different clinician even if the appointment ID is known. Notes are auto-saved at regular
+intervals using a background \texttt{PATCH} request so that partially written notes are not
+lost if the browser is closed before the doctor explicitly saves.
 
 \subsection{Prescription Writing}
 \label{subsec:prescription}
 
-The prescription form submits to \texttt{POST /doctor/prescription}, which inserts a row into \texttt{prescriptions} and iterates over the submitted medicine array, inserting one row per medicine into \texttt{prescription\_items}. Both inserts run inside a single transaction to prevent orphaned prescription headers on partial failure.
+The prescription form submits to \texttt{POST /doctor/prescription}, which inserts a row
+into \texttt{prescriptions} and iterates over the submitted medicine array, inserting one
+row per medicine into \texttt{prescription\_items}. Both inserts run inside a single
+transaction to prevent orphaned prescription headers on partial failure. The medicine
+selection field queries the \texttt{medicines} table scoped to the doctor's hospital,
+ensuring that prescriptions reference only drugs available in the facility's inventory.
+Dosage, frequency, and duration fields carry server-side constraints that reject
+implausible values, such as a duration of zero days, before the transaction is opened.
+Once committed, the prescription is immediately visible to the patient in their records
+view and a notification is dispatched to inform them that a new prescription is available.
 
 \subsection{Lab Report Review}
 \label{subsec:lab-review}
 
-Reports shared with the doctor are retrieved from \texttt{lab\_reports} filtered by \texttt{doctor\_id}, rendering the test name, result value, reference range, and any attached file. The doctor can mark a report as reviewed, setting \texttt{lab\_reports.reviewed\_by\_doctor} to true.
+Reports shared with the doctor are retrieved from \texttt{lab\_reports} filtered by
+\texttt{doctor\_id}, rendering the test name, result value, reference range, and any
+attached file. The doctor can mark a report as reviewed, setting
+\texttt{lab\_reports.reviewed\_by\_doctor} to true. Reports are sorted with unreviewed
+entries first and critical out-of-range results visually flagged, ensuring that the most
+clinically urgent items are addressed before routine results. The reviewed status update
+is issued as a lightweight \texttt{PATCH} request without a full page reload, allowing
+the doctor to work through a queue of reports efficiently. Once marked as reviewed, a
+report moves to a separate archive panel, keeping the active queue uncluttered.
 
 \subsection{Leave Application}
 \label{subsec:leave}
 
-The leave application form collects start date, end date, and reason. On submission, \texttt{POST /doctor/leave} inserts a row into \texttt{doctor\_leaves} with status \texttt{pending}, after which the availability query excludes any slots overlapping with approved leave for that doctor.
+The leave application form collects start date, end date, and reason. On submission,
+\texttt{POST /doctor/leave} inserts a row into \texttt{doctor\_leaves} with status
+\texttt{pending}, after which the availability query excludes any slots overlapping with
+approved leave for that doctor. The form enforces a minimum notice period server-side,
+rejecting applications for leave beginning within the next 24 hours to give the
+administrator adequate time to review the request and arrange cover if needed. The doctor
+can view all submitted leave applications and their current status — \texttt{pending},
+\texttt{approved}, or \texttt{rejected} — in a dedicated leave history panel, and
+receives an in-app notification when the admin acts on a request, eliminating the need
+to poll the panel manually.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Admin Module Implementation}
 \label{sec:admin}
 
-The admin dashboard, shown in Figure~\ref{fig:dashboard-admin}, aggregates hospital-wide statistics through parallel \texttt{COUNT} and \texttt{SUM} queries: total registered patients, active doctors, appointments in the current month, and medicines below their reorder threshold.
+The admin module gives hospital administrators full oversight of facility operations, encompassing doctor and technician account management, medicine inventory, and leave approvals. All routes are protected by the \texttt{requireAdmin} guard and organised within \texttt{routes/admin/}. The dashboard provides a high-level summary before the administrator navigates to a specific management function.
+
+\noindent
+The admin dashboard, shown in Figure~\ref{fig:dashboard-admin}, aggregates hospital-wide statistics through parallel \texttt{COUNT} and \texttt{SUM} queries: total registered patients, active doctors, appointments in the current month, and medicines below their reorder threshold. These statistics are refreshed on each dashboard load rather than cached, ensuring the administrator always sees current figures when making operational decisions.
 
 \begin{figure}[ht]
 \centering
@@ -138,43 +269,93 @@ The admin dashboard, shown in Figure~\ref{fig:dashboard-admin}, aggregates hospi
 \subsection{Doctor Registration}
 \label{subsec:admin-doctor}
 
-Doctors are registered at \texttt{POST /admin/doctors/create}. The handler hashes the initial password, inserts into \texttt{users} with role \texttt{doctor}, then inserts the profile row into \texttt{doctors} (specialisation, qualification, consultation fee). Both inserts are wrapped in a transaction to prevent a \texttt{users} row existing without a corresponding \texttt{doctors} profile.
+Doctors are registered at \texttt{POST /admin/doctors/create}. The handler hashes the
+initial password, inserts into \texttt{users} with role \texttt{doctor}, then inserts the
+profile row into \texttt{doctors} (specialisation, qualification, consultation fee). Both
+inserts are wrapped in a transaction to prevent a \texttt{users} row existing without a
+corresponding \texttt{doctors} profile. The admin can also set the doctor's weekly
+availability schedule at registration time, which is stored as an array of weekday
+identifiers in the \texttt{doctors} table and used immediately by the availability query
+once the account is active. A registration confirmation email is dispatched to the
+doctor's provided address upon successful commit, containing their login credentials and
+a prompt to change their password on first sign-in.
 
 \subsection{Medicine Inventory Management}
 \label{subsec:medicine}
 
-The medicine management page lists all rows from the \texttt{medicines} table with current stock and reorder level. Admins can add medicines, update stock via parameterised \texttt{UPDATE} statements, and deactivate discontinued medicines by setting an \texttt{is\_active} flag rather than deleting rows, preserving referential integrity with historical prescriptions.
+The medicine management page lists all rows from the \texttt{medicines} table with current
+stock and reorder level. Admins can add medicines, update stock via parameterised
+\texttt{UPDATE} statements, and deactivate discontinued medicines by setting an
+\texttt{is\_active} flag rather than deleting rows, preserving referential integrity with
+historical prescriptions. Medicines whose current stock has fallen to or below the reorder
+level are highlighted on the management page, giving the administrator an immediate visual
+indication of items requiring procurement action. Stock adjustments are logged with the
+administrator's user ID and a timestamp in a separate audit table, providing a traceable
+record of every inventory change that can be reviewed in the event of a discrepancy.
 
 \subsection{Lab Technician Account Creation}
 \label{subsec:lab-account}
 
-Lab technician accounts are created at \texttt{POST /admin/lab/create}, following the same two-table pattern as doctor registration: an entry in \texttt{users} with role \texttt{lab} and a supplementary row in \texttt{lab\_technicians}.
+Lab technician accounts are created at \texttt{POST /admin/lab/create}, following the same
+two-table pattern as doctor registration: an entry in \texttt{users} with role \texttt{lab}
+and a supplementary row in \texttt{lab\_technicians}. As with doctor registration, both
+inserts are executed within a single transaction so that a failure at any point leaves no
+partial records in the database. The admin specifies the technician's assigned department
+and shift at creation time, which are stored in the \texttt{lab\_technicians} row and
+displayed alongside the technician's name in the admin management list. A welcome email is
+sent to the technician upon successful account creation, containing their initial credentials
+and a link to the platform's login page.
 
 \subsection{Leave Approval Workflow}
 \label{subsec:leave-approval}
 
-The admin views pending leave requests from \texttt{doctor\_leaves} where \texttt{status = 'pending'}. Approving issues an \texttt{UPDATE} to \texttt{status = 'approved'}, causing the availability query to exclude those dates. Rejecting sets \texttt{status = 'rejected'} and optionally stores a rejection reason.
+The admin views pending leave requests from \texttt{doctor\_leaves} where
+\texttt{status = 'pending'}. Approving issues an \texttt{UPDATE} to
+\texttt{status = 'approved'}, causing the availability query to exclude those dates.
+Rejecting sets \texttt{status = 'rejected'} and optionally stores a rejection reason.
+The leave management panel presents requests ordered by the earliest leave start date,
+helping the administrator prioritise those that require the most immediate attention.
+When a request is approved, any existing appointments scheduled for the affected dates
+are surfaced in a confirmation dialog, prompting the administrator to decide whether to
+cancel or reassign those appointments before the approval is committed, preventing
+patients from arriving for consultations with an absent doctor.
 
 % ─────────────────────────────────────────────────────────────────────────────
-\subsection{Lab Technician Module Implementation}
+\section{Lab Technician Module Implementation}
+\label{sec:lab}
 
-\subsubsection{Report Submission Form}
+The lab technician module handles the end-to-end process of creating and managing laboratory reports, from identifying the correct patient through to controlling which parties can view the results. Routes are protected by the \texttt{requireLab} guard and are organised within \texttt{routes/lab/}. The two primary functional areas are the report submission form and the patient history table.
 
-The report submission interface, shown in Figure 5.6, is rendered by \texttt{GET /lab/report/new}. It walks the technician through a structured multi-step process on a single page, with each step validated before the next becomes accessible.
+\subsection{Report Submission Form}
+\label{subsec:lab-report-form}
 
-\begin{enumerate}
-    \item \textbf{Patient Selection} — A search field queries registered patients by name or patient ID in real time, populating a dropdown with matching results and displaying basic patient details as a confirmation prompt.
+The report submission interface, shown in Figure~\ref{fig:lab-form}, is rendered by \texttt{GET /lab/report/new}. It walks the technician through a structured multi-step process on a single page, with each step validated before the next becomes accessible.
 
-    \item \textbf{Test Entry} — The technician selects or types the test name from a pre-populated, hospital-scoped list of diagnostic tests, then enters the result value and reference range into dedicated fields.
+\noindent
+The first step is patient selection, in which a search field queries registered patients by
+name or patient ID in real time, populating a dropdown with matching results and displaying
+basic patient details as a confirmation prompt. Once a patient is confirmed, the technician
+proceeds to test entry, selecting or typing the test name from a pre-populated,
+hospital-scoped list of diagnostic tests and entering the result value and reference range
+into dedicated fields.
 
-    \item \textbf{Result Validation} — Client-side logic immediately compares the entered result against the reference range and flags out-of-range values with a visual indicator, serving as a safeguard against data entry errors without blocking submission.
+\noindent
+Client-side logic then performs result validation by immediately comparing the entered
+result against the reference range and flagging out-of-range values with a visual
+indicator. This serves as a safeguard against data entry errors without blocking
+submission. The technician may then optionally attach a file: a PDF or image of the
+physical report can be uploaded, validated for type and size client-side, saved
+server-side to \texttt{/public/uploads/reports/}, and its path stored in
+\texttt{lab\_reports.file\_path}.
 
-    \item \textbf{File Upload} — An optional PDF or image of the physical report can be attached. The file is validated for type and size client-side, saved server-side to \texttt{/public/uploads/reports/}, and its path stored in \texttt{lab\_reports.file\_path}.
-
-    \item \textbf{Sharing Preferences} — Checkboxes determine visibility: the technician can share the report with the patient, the referring doctor, or both. Selections map directly to the corresponding boolean columns in the \texttt{lab\_reports} table.
-\end{enumerate}
-
-On submission, a \texttt{POST} request is dispatched to \texttt{/lab/report/submit}, which validates the payload server-side, persists the record, and redirects the technician to the report list view where the new entry appears at the top with a timestamp and patient reference.
+\noindent
+The final step is configuring sharing preferences. Checkboxes determine visibility,
+allowing the technician to share the report with the patient, the referring doctor, or
+both; these selections map directly to the corresponding boolean columns in the
+\texttt{lab\_reports} table. On submission, a \texttt{POST} request is dispatched to
+\texttt{/lab/report/submit}, which validates the payload server-side, persists the
+record, and redirects the technician to the report list view where the new entry appears
+at the top with a timestamp and patient reference.
 
 \begin{figure}[ht]
 \centering
@@ -186,51 +367,131 @@ On submission, a \texttt{POST} request is dispatched to \texttt{/lab/report/subm
 \subsection{Patient History Table}
 \label{subsec:lab-history}
 
-Below the submission form, the technician's home page renders a paginated table of previously submitted reports ordered by submission date descending. Each row shows the patient name, test name, submission date, and current sharing status, with an edit link for correction within a configurable time window.
+Below the submission form, the technician's home page renders a paginated table of
+previously submitted reports ordered by submission date descending. Each row shows the
+patient name, test name, submission date, and current sharing status, with an edit link
+for correction within a configurable time window. The edit link opens an in-place form
+pre-populated with the original values, allowing the technician to correct a result or
+update sharing preferences without re-entering data from scratch. Edits made after the
+correction window has elapsed are disabled at the route level, ensuring that once a
+report has passed the review period its contents are treated as final and any subsequent
+changes must go through an administrator. The pagination limit is configurable per
+deployment and defaults to twenty rows per page, keeping the table responsive even when
+a technician has submitted a large volume of reports over time.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Payment Implementation}
 \label{sec:payment}
 
-Payment processing is integrated at \texttt{routes/payment.js}. When a patient confirms a slot (Section~\ref{subsec:appt-booking}), the handler creates a payment intent via the gateway API using the fee from \texttt{doctors.consultation\_fee}. The returned client secret is passed to the EJS template, where client-side JavaScript mounts the payment widget without card details touching the application server.
+Payment processing is integrated at \texttt{routes/payment.js}. When a patient confirms a
+slot (Section~\ref{subsec:appt-booking}), the handler creates a payment intent via the
+gateway API using the fee from \texttt{doctors.consultation\_fee}. The returned client
+secret is passed to the EJS template, where client-side JavaScript mounts the payment
+widget without card details touching the application server. This architecture satisfies
+PCI DSS requirements by ensuring that sensitive card data is entered directly into a
+gateway-hosted iframe and never passes through the application's own network boundary.
+The payment page displays a clear summary of the appointment details and total amount due
+before the patient proceeds, reducing the likelihood of disputed charges arising from
+unclear billing information.
 
 \noindent
-On successful authorisation, the gateway sends an asynchronous webhook \texttt{POST} to \texttt{/payment/webhook}. The handler verifies the event signature using the gateway's signing secret, then updates the \texttt{appointments} row from \texttt{pending\_payment} to \texttt{confirmed}. Webhook-driven confirmation ensures appointment status is always set by an authoritative server-to-server event, even if the patient closes the browser after payment.
+On successful authorisation, the gateway sends an asynchronous webhook \texttt{POST} to
+\texttt{/payment/webhook}. The handler verifies the event signature using the gateway's
+signing secret, then updates the \texttt{appointments} row from \texttt{pending\_payment}
+to \texttt{confirmed}. Webhook-driven confirmation ensures appointment status is always
+set by an authoritative server-to-server event, even if the patient closes the browser
+after payment. A payment record is also inserted into the \texttt{payments} table at this
+point, capturing the gateway transaction reference, amount, and timestamp for billing
+reconciliation. If the webhook delivery fails or arrives out of order, the handler is
+idempotent: processing the same event a second time produces no additional state change,
+preventing duplicate confirmations from corrupting the appointment record.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Real-Time Messaging Implementation}
 \label{sec:messaging}
 
-Real-time chat is implemented with Socket.io attached to the Express HTTP server. When a user opens the messaging view, the client emits a \texttt{joinRoom} event carrying the appointment ID; the server places the socket into a named room derived from that ID, isolating messages per consultation.
+Real-time chat is implemented with Socket.io attached to the Express HTTP server. When a
+user opens the messaging view, the client emits a \texttt{joinRoom} event carrying the
+appointment ID; the server places the socket into a named room derived from that ID,
+isolating messages per consultation. Room membership is validated server-side on every
+\texttt{joinRoom} event by confirming that the authenticated user is either the patient
+or the doctor associated with the given appointment, preventing a user from joining a
+room that does not belong to them even if they construct the event payload manually.
 
 \noindent
-Incoming \texttt{sendMessage} events are persisted to the \texttt{messages} table — capturing sender ID, room ID, content, and timestamp — before broadcasting a \texttt{receiveMessage} event to the room. Persisting before broadcasting allows reconnecting users to retrieve full conversation history from the database on page load, independent of Socket.io's in-memory state. A Redis adapter shares the room registry across server instances, enabling horizontal scaling.
+Incoming \texttt{sendMessage} events are persisted to the \texttt{messages} table —
+capturing sender ID, room ID, content, and timestamp — before broadcasting a
+\texttt{receiveMessage} event to the room. Persisting before broadcasting allows
+reconnecting users to retrieve full conversation history from the database on page load,
+independent of Socket.io's in-memory state. Message content is sanitised server-side
+before storage to strip any HTML or script tags, preventing stored cross-site scripting
+via the chat interface. A Redis adapter shares the room registry across server instances,
+enabling horizontal scaling without requiring sticky sessions or a centralised Socket.io
+broker.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Database Query Implementation}
 \label{sec:db-queries}
 
-All database access goes through a thin helper in \texttt{db/index.js} exposing a single \texttt{query(sql, params)} function. Parameterised placeholders (\texttt{\$1}, \texttt{\$2}, \ldots) are used throughout to prevent SQL injection.
+All database access goes through a thin helper in \texttt{db/index.js} exposing a single
+\texttt{query(sql, params)} function. Parameterised placeholders (\texttt{\$1},
+\texttt{\$2}, \ldots) are used throughout to prevent SQL injection. The subsections below
+document the most significant query patterns employed across the application, each of
+which addresses a distinct correctness or performance concern.
 
 \subsection{Availability Check}
 \label{subsec:avail-query}
 
-The availability query returns only slots satisfying all three conditions simultaneously: the slot falls within the doctor's declared availability for that weekday, no confirmed appointment occupies it, and the date does not overlap with any approved leave. A \texttt{LEFT JOIN} from the generated slot series against \texttt{appointments} and \texttt{doctor\_leaves} filters where both join targets return \texttt{NULL}.
+The availability query returns only slots satisfying all three conditions simultaneously:
+the slot falls within the doctor's declared availability for that weekday, no confirmed
+appointment occupies it, and the date does not overlap with any approved leave. A
+\texttt{LEFT JOIN} from the generated slot series against \texttt{appointments} and
+\texttt{doctor\_leaves} filters where both join targets return \texttt{NULL}. The slot
+series itself is generated using a PostgreSQL \texttt{generate\_series} call bounded by
+the doctor's earliest and latest available times for the requested weekday, avoiding the
+need to maintain a separate slots table and ensuring that availability reflects changes
+to the doctor's schedule without requiring a backfill. The query is parameterised on
+doctor ID and requested date, and its result set is cached in the session for the
+duration of Step 2 of the booking flow to avoid redundant database calls as the patient
+browses the time grid.
 
 \subsection{Appointment Creation with Transaction}
 \label{subsec:appt-transaction}
 
-Appointment insertion is wrapped in an explicit transaction to guard against double-booking under concurrent requests. The transaction locks the target slot with \texttt{SELECT \ldots FOR UPDATE}, rechecks availability within the lock, inserts the appointment, and commits. If the recheck finds the slot taken, the transaction rolls back and the route returns a conflict response.
+Appointment insertion is wrapped in an explicit transaction to guard against double-booking
+under concurrent requests. The transaction locks the target slot with
+\texttt{SELECT \ldots FOR UPDATE}, rechecks availability within the lock, inserts the
+appointment, and commits. If the recheck finds the slot taken, the transaction rolls back
+and the route returns a conflict response. The lock scope is intentionally narrow,
+targeting only the specific doctor and time slot combination, so that concurrent bookings
+for different doctors or different slots on the same doctor's calendar are not
+unnecessarily serialised, preserving throughput during peak booking periods.
 
 \subsection{UUID Generation}
 \label{subsec:uuid}
 
-Primary keys for \texttt{users}, \texttt{appointments}, \texttt{prescriptions}, and \texttt{lab\_reports} use UUIDs generated by PostgreSQL's \texttt{gen\_random\_uuid()} function as a column default, avoiding guessable sequential IDs in URLs and removing the need for application-level UUID libraries.
+Primary keys for \texttt{users}, \texttt{appointments}, \texttt{prescriptions}, and
+\texttt{lab\_reports} use UUIDs generated by PostgreSQL's \texttt{gen\_random\_uuid()}
+function as a column default, avoiding guessable sequential IDs in URLs and removing the
+need for application-level UUID libraries. Because UUID generation is handled by the
+database rather than the application layer, the correct primary key value is always
+available in the \texttt{RETURNING} clause of the insert statement, eliminating an
+additional \texttt{SELECT} round-trip to retrieve the new record's identifier after
+insertion.
 
 \subsection{Index Usage}
 \label{subsec:indexes}
 
-Indexes are defined on columns most frequently used in \texttt{WHERE} clauses: \texttt{appointments.patient\_id}, \texttt{appointments.doctor\_id}, \texttt{appointments.appointment\_date}, \texttt{lab\_reports.patient\_id}, and \texttt{doctor\_leaves.doctor\_id}. These allow dashboard and availability queries to use index scans rather than sequential scans as the dataset grows.
+Indexes are defined on columns most frequently used in \texttt{WHERE} clauses:
+\texttt{appointments.patient\_id}, \texttt{appointments.doctor\_id},
+\texttt{appointments.appointment\_date}, \texttt{lab\_reports.patient\_id}, and
+\texttt{doctor\_leaves.doctor\_id}. These allow dashboard and availability queries to use
+index scans rather than sequential scans as the dataset grows. Query plans are verified
+during development using \texttt{EXPLAIN ANALYSE} to confirm that new queries make use
+of the appropriate indexes and do not introduce full table scans against large tables.
+Any query whose execution plan reveals a missing index is addressed before the associated
+feature is merged, keeping query performance predictable as the volume of clinical data
+accumulates over time.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Summary}
