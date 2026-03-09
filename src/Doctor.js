@@ -1,10 +1,206 @@
 const { query } = require('./db/config');
 
 // ============================================
+// SECURITY: HTML escape helper — use on ALL
+// user/DB-sourced values before injecting into HTML
+// ============================================
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ============================================
+// Normalize doctor row (DB snake_case + camelCase fallbacks)
+// Call once at the boundary — never scatter this logic in templates
+// ============================================
+function normalizeDoctor(raw) {
+  const d = { ...raw };
+  d.name             = d.full_name || d.name || d.fullName || 'Doctor';
+  d.doctor_uuid      = d.doctor_uuid || d.doctor_id || d.id || 'DR-0000';
+  d.consultation_fee = d.consultation_fee || d.consultationFee || 'N/A';
+  d.available_days   = d.available_days || d.availableDays || [];
+  d.available_time   = d.available_time || d.availableTime || 'N/A';
+  d.contact          = d.contact || d.phone || 'N/A';
+  d.specialization   = d.specialization || 'Specialist';
+  d.designation      = d.designation || 'Doctor';
+  d.experience       = d.experience || 'N/A';
+  d.qualification    = d.qualification || 'N/A';
+  d.address          = d.address || '';
+  d.email            = d.email || 'N/A';
+  return d;
+}
+
+// ============================================
+// Shared card builders (single source of truth)
+// ============================================
+function buildAptCardHTML(apt) {
+  return `
+    <div class="cyan-light rounded-xl p-5 hover-lift appointment-card" data-id="${esc(apt.appointment_id)}">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div class="flex items-center space-x-4">
+          <div class="w-14 h-14 cyan-bg rounded-full flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-user-injured text-xl text-white"></i>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold cyan-text">${esc(apt.patient_name)}</h3>
+            <p class="text-gray-500 text-sm">ID: ${esc(apt.patient_uuid || 'N/A')}</p>
+            <p class="text-gray-700 text-sm mt-1"><i class="fas fa-stethoscope mr-1 cyan-text"></i>${esc(apt.reason || 'General Consultation')}</p>
+          </div>
+        </div>
+        <div class="flex flex-col items-start md:items-end gap-2">
+          <div class="flex items-center gap-3">
+            <span class="status-badge status-${esc(apt.status || 'pending')}">${esc(apt.status || 'pending')}</span>
+            <span class="text-lg font-bold cyan-text">${esc(apt.appointment_time ? String(apt.appointment_time).substring(0, 5) : '--:--')}</span>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button class="px-3 py-1.5 btn-cyan rounded-lg text-sm start-consult-btn"
+              data-id="${esc(apt.appointment_id)}"
+              data-patient="${esc(apt.patient_name)}"
+              data-patient-id="${esc(apt.patient_id)}">
+              <i class="fas fa-play-circle mr-1"></i>Start Consult
+            </button>
+            ${apt.appointment_type === 'online'
+              ? `<button class="px-3 py-1.5 btn-green rounded-lg text-sm video-btn" data-id="${esc(apt.appointment_id)}"><i class="fas fa-video mr-1"></i>Video Call</button>`
+              : ''}
+            <button class="px-3 py-1.5 btn-white rounded-lg text-sm reschedule-btn" data-id="${esc(apt.appointment_id)}">Reschedule</button>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-200">
+        <span class="text-xs cyan-text">
+          <i class="fas fa-${apt.appointment_type === 'online' ? 'wifi' : 'hospital'} mr-1"></i>
+          ${apt.appointment_type === 'online' ? 'Online Consultation' : 'In-person Visit'}
+        </span>
+        <div class="flex gap-2">
+          <button class="text-xs cyan-bg text-white px-3 py-1 rounded view-patient-history-btn"
+            data-patient-id="${esc(apt.patient_id)}"
+            data-patient-name="${esc(apt.patient_name)}">
+            <i class="fas fa-file-medical mr-1"></i>History
+          </button>
+          <button class="text-xs btn-white px-3 py-1 rounded message-patient-btn"
+            data-patient-id="${esc(apt.patient_id)}"
+            data-patient-name="${esc(apt.patient_name)}">
+            <i class="fas fa-comment-medical mr-1"></i>Message
+          </button>
+          <button class="text-xs btn-cyan px-3 py-1 rounded prescribe-btn"
+            data-patient-id="${esc(apt.patient_id)}"
+            data-patient-name="${esc(apt.patient_name)}">
+            <i class="fas fa-prescription mr-1"></i>Prescribe
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function buildReportCardHTML(r) {
+  const isECG = r.test_type && r.test_type.toLowerCase().includes('ecg');
+  return `
+    <div class="cyan-light rounded-xl p-5 hover-lift report-card" data-id="${esc(r.report_id)}">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div class="flex items-center space-x-4">
+          <div class="w-14 h-14 ${r.status === 'reviewed' ? 'cyan-bg' : 'cyan-dark'} rounded-full flex items-center justify-center flex-shrink-0">
+            <i class="fas ${isECG ? 'fa-heartbeat' : 'fa-vial'} text-xl text-white"></i>
+          </div>
+          <div>
+            <h3 class="text-lg font-bold cyan-text">${esc(r.patient_name)}</h3>
+            <p class="text-gray-500 text-sm">ID: ${esc(r.patient_uuid || 'N/A')}</p>
+            <p class="text-gray-700 text-sm mt-1"><i class="fas fa-flask mr-1 cyan-text"></i>${esc(r.test_type)}</p>
+          </div>
+        </div>
+        <div class="flex flex-col items-start md:items-end gap-2">
+          <div class="flex items-center gap-3">
+            <span class="status-badge status-${esc(r.status)}">${esc(r.status)}</span>
+            <span class="text-sm cyan-text">${new Date(r.test_date).toLocaleDateString()}</span>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button class="px-3 py-1.5 btn-cyan rounded-lg text-sm view-report-btn" data-id="${esc(r.report_id)}">
+              <i class="fas fa-eye mr-1"></i>View
+            </button>
+            <button class="px-3 py-1.5 btn-white rounded-lg text-sm write-findings-btn"
+              data-id="${esc(r.report_id)}"
+              data-findings="${esc(r.findings || '')}">
+              ${r.status === 'reviewed' ? 'Update' : 'Add Findings'}
+            </button>
+            <button class="px-3 py-1.5 btn-white rounded-lg text-sm download-report-btn"
+              data-id="${esc(r.report_id)}"
+              data-patient="${esc(r.patient_name)}"
+              data-type="${esc(r.test_type)}"
+              data-date="${esc(r.test_date)}"
+              data-findings="${esc(r.findings || '')}">
+              <i class="fas fa-download mr-1"></i>PDF
+            </button>
+            <button class="px-3 py-1.5 btn-white rounded-lg text-sm share-report-btn" data-id="${esc(r.report_id)}">
+              <i class="fas fa-share-alt mr-1"></i>Share
+            </button>
+            <button class="px-3 py-1.5 btn-red rounded-lg text-sm delete-report-btn"
+              data-id="${esc(r.report_id)}"
+              data-patient="${esc(r.patient_name)}"
+              data-type="${esc(r.test_type)}">
+              <i class="fas fa-trash mr-1"></i>Delete
+            </button>
+          </div>
+        </div>
+      </div>
+      ${r.findings
+        ? `<div class="mt-3 p-3 white-card rounded-lg border-l-4 cyan-border">
+             <p class="text-xs cyan-text font-semibold mb-1">Findings:</p>
+             <p class="text-sm text-gray-700">${esc(r.findings)}</p>
+           </div>`
+        : ''}
+    </div>`;
+}
+
+function buildPatientCardHTML(p) {
+  return `
+    <div class="cyan-light rounded-xl p-5 hover-lift patient-card" data-id="${esc(p.patient_id)}">
+      <div class="flex items-center space-x-4 mb-4">
+        <div class="w-14 h-14 cyan-bg rounded-full flex items-center justify-center flex-shrink-0">
+          <i class="fas fa-user-injured text-xl text-white"></i>
+        </div>
+        <div>
+          <h3 class="text-base font-bold cyan-text patient-name">${esc(p.full_name)}</h3>
+          <p class="text-gray-500 text-xs">ID: ${esc(p.patient_uuid || 'N/A')}</p>
+          <p class="text-xs cyan-text">${esc(p.age || 'N/A')} yrs • ${esc(p.gender || 'N/A')}</p>
+        </div>
+      </div>
+      <div class="space-y-2 mb-3 text-sm">
+        <div class="flex justify-between">
+          <span class="cyan-text opacity-75">Blood Group:</span>
+          <span class="font-medium cyan-text">${esc(p.blood_group || 'N/A')}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="cyan-text opacity-75">Last Visit:</span>
+          <span class="cyan-text">${p.last_visit ? new Date(p.last_visit).toLocaleDateString() : 'N/A'}</span>
+        </div>
+      </div>
+      <div class="flex items-center justify-between pt-3 border-t border-gray-200">
+        <span class="status-badge status-active">Active</span>
+        <div class="flex space-x-2">
+          <button class="w-9 h-9 cyan-bg rounded-full flex items-center justify-center text-white view-patient-btn"
+            title="View Profile" data-patient-id="${esc(p.patient_id)}">
+            <i class="fas fa-user-md text-sm"></i>
+          </button>
+          <button class="w-9 h-9 btn-green rounded-full flex items-center justify-center text-white online-consult-btn"
+            title="Online Consult" data-patient-id="${esc(p.patient_id)}" data-patient-name="${esc(p.full_name)}">
+            <i class="fas fa-video text-sm"></i>
+          </button>
+          <button class="w-9 h-9 cyan-dark rounded-full flex items-center justify-center text-white message-patient-btn"
+            title="Message" data-patient-id="${esc(p.patient_id)}" data-patient-name="${esc(p.full_name)}">
+            <i class="fas fa-comment text-sm"></i>
+          </button>
+          <button class="w-9 h-9 btn-white rounded-full flex items-center justify-center cyan-text prescribe-btn"
+            title="Prescribe" data-patient-id="${esc(p.patient_id)}" data-patient-name="${esc(p.full_name)}">
+            <i class="fas fa-prescription text-sm"></i>
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ============================================
 // FUNCTION TO GENERATE DOCTOR DASHBOARD HTML
 // ============================================
 function generateDoctorHTML(doctor = null, appointments = [], reports = [], patientList = []) {
-  const doctorData = doctor || {
+  const doctorData = normalizeDoctor(doctor || {
     doctor_uuid: 'DR-2024-0567',
     full_name: 'Dr. Sarah Chen',
     designation: 'Senior Cardiologist',
@@ -17,27 +213,14 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
     consultation_fee: '$150',
     available_days: ['Mon', 'Wed', 'Fri'],
     available_time: '9:00 AM - 5:00 PM'
-  };
-
-  // Normalize field names from DB rows
-  doctorData.name        = doctorData.full_name || doctorData.name || doctorData.fullName || 'Doctor';
-  doctorData.doctor_uuid = doctorData.doctor_uuid || doctorData.doctor_id || doctorData.id || 'DR-0000';
-  doctorData.consultation_fee = doctorData.consultation_fee || doctorData.consultationFee || 'N/A';
-  doctorData.available_days   = doctorData.available_days || doctorData.availableDays || [];
-  doctorData.available_time   = doctorData.available_time || doctorData.availableTime || 'N/A';
-  doctorData.contact     = doctorData.contact || doctorData.phone || 'N/A';
-  doctorData.specialization = doctorData.specialization || 'Specialist';
-  doctorData.designation    = doctorData.designation || 'Doctor';
-  doctorData.experience     = doctorData.experience || 'N/A';
-  doctorData.qualification  = doctorData.qualification || 'N/A';
-  doctorData.address        = doctorData.address || '';
-  doctorData.email          = doctorData.email || 'N/A';
+  });
 
   const availDaysStr = Array.isArray(doctorData.available_days)
     ? doctorData.available_days.join(', ')
     : (doctorData.available_days || 'N/A');
 
-  const initials = doctorData.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 3);
+  // Safe initials: guard against empty/whitespace name
+  const initials = doctorData.name.split(' ').filter(Boolean).map(n => n[0] ?? '').join('').toUpperCase().slice(0, 3) || 'DR';
 
   const todaysAppointments = appointments || [];
   const labReports         = reports || [];
@@ -48,102 +231,8 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
   const onlineCount    = todaysAppointments.filter(a => a.appointment_type === 'online').length;
   const inPersonCount  = todaysAppointments.filter(a => a.appointment_type === 'in-person').length;
 
-  // ---- Appointment card HTML helper ----
-  const aptCard = (apt) => `
-    <div class="cyan-light rounded-xl p-5 hover-lift appointment-card" data-id="${apt.appointment_id}">
-      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div class="flex items-center space-x-4">
-          <div class="w-14 h-14 cyan-bg rounded-full flex items-center justify-center flex-shrink-0">
-            <i class="fas fa-user-injured text-xl text-white"></i>
-          </div>
-          <div>
-            <h3 class="text-lg font-bold cyan-text">${apt.patient_name}</h3>
-            <p class="text-gray-500 text-sm">ID: ${apt.patient_uuid || 'N/A'}</p>
-            <p class="text-gray-700 text-sm mt-1"><i class="fas fa-stethoscope mr-1 cyan-text"></i>${apt.reason || 'General Consultation'}</p>
-          </div>
-        </div>
-        <div class="flex flex-col items-start md:items-end gap-2">
-          <div class="flex items-center gap-3">
-            <span class="status-badge status-${apt.status || 'pending'}">${apt.status || 'pending'}</span>
-            <span class="text-lg font-bold cyan-text">${apt.appointment_time ? apt.appointment_time.substring(0,5) : '--:--'}</span>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <button class="px-3 py-1.5 btn-cyan rounded-lg text-sm start-consult-btn" data-id="${apt.appointment_id}" data-patient="${apt.patient_name}" data-patient-id="${apt.patient_id}">
-              <i class="fas fa-play-circle mr-1"></i>Start Consult
-            </button>
-            ${apt.appointment_type === 'online' ? `<button class="px-3 py-1.5 btn-green rounded-lg text-sm video-btn" data-id="${apt.appointment_id}"><i class="fas fa-video mr-1"></i>Video Call</button>` : ''}
-            <button class="px-3 py-1.5 btn-white rounded-lg text-sm reschedule-btn" data-id="${apt.appointment_id}">Reschedule</button>
-          </div>
-        </div>
-      </div>
-      <div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-200">
-        <span class="text-xs cyan-text"><i class="fas fa-${apt.appointment_type === 'online' ? 'wifi' : 'hospital'} mr-1"></i>${apt.appointment_type === 'online' ? 'Online Consultation' : 'In-person Visit'}</span>
-        <div class="flex gap-2">
-          <button class="text-xs cyan-bg text-white px-3 py-1 rounded view-patient-history-btn" data-patient-id="${apt.patient_id}" data-patient-name="${apt.patient_name}"><i class="fas fa-file-medical mr-1"></i>History</button>
-          <button class="text-xs btn-white px-3 py-1 rounded message-patient-btn" data-patient-id="${apt.patient_id}" data-patient-name="${apt.patient_name}"><i class="fas fa-comment-medical mr-1"></i>Message</button>
-          <button class="text-xs btn-cyan px-3 py-1 rounded prescribe-btn" data-patient-id="${apt.patient_id}" data-patient-name="${apt.patient_name}"><i class="fas fa-prescription mr-1"></i>Prescribe</button>
-        </div>
-      </div>
-    </div>`;
-
-  // ---- Report card HTML helper ----
-  const rptCard = (r) => `
-    <div class="cyan-light rounded-xl p-5 hover-lift report-card" data-id="${r.report_id}">
-      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div class="flex items-center space-x-4">
-          <div class="w-14 h-14 ${r.status === 'reviewed' ? 'cyan-bg' : 'cyan-dark'} rounded-full flex items-center justify-center flex-shrink-0">
-            <i class="fas ${r.test_type && r.test_type.toLowerCase().includes('ecg') ? 'fa-heartbeat' : 'fa-vial'} text-xl text-white"></i>
-          </div>
-          <div>
-            <h3 class="text-lg font-bold cyan-text">${r.patient_name}</h3>
-            <p class="text-gray-500 text-sm">ID: ${r.patient_uuid || 'N/A'}</p>
-            <p class="text-gray-700 text-sm mt-1"><i class="fas fa-flask mr-1 cyan-text"></i>${r.test_type}</p>
-          </div>
-        </div>
-        <div class="flex flex-col items-start md:items-end gap-2">
-          <div class="flex items-center gap-3">
-            <span class="status-badge status-${r.status}">${r.status}</span>
-            <span class="text-sm cyan-text">${new Date(r.test_date).toLocaleDateString()}</span>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <button class="px-3 py-1.5 btn-cyan rounded-lg text-sm view-report-btn" data-id="${r.report_id}"><i class="fas fa-eye mr-1"></i>View</button>
-            <button class="px-3 py-1.5 btn-white rounded-lg text-sm write-findings-btn" data-id="${r.report_id}" data-findings="${(r.findings || '').replace(/"/g, '&quot;')}">${r.status === 'reviewed' ? 'Update' : 'Add Findings'}</button>
-            <button class="px-3 py-1.5 btn-white rounded-lg text-sm download-report-btn" data-id="${r.report_id}" data-patient="${r.patient_name}" data-type="${r.test_type}" data-date="${r.test_date}" data-findings="${(r.findings || '').replace(/"/g, '&quot;')}"><i class="fas fa-download mr-1"></i>PDF</button>
-            <button class="px-3 py-1.5 btn-white rounded-lg text-sm share-report-btn" data-id="${r.report_id}"><i class="fas fa-share-alt mr-1"></i>Share</button>
-            <button class="px-3 py-1.5 btn-red rounded-lg text-sm delete-report-btn" data-id="${r.report_id}" data-patient="${r.patient_name}" data-type="${r.test_type}"><i class="fas fa-trash mr-1"></i>Delete</button>
-          </div>
-        </div>
-      </div>
-      ${r.findings ? `<div class="mt-3 p-3 white-card rounded-lg border-l-4 cyan-border"><p class="text-xs cyan-text font-semibold mb-1">Findings:</p><p class="text-sm text-gray-700">${r.findings}</p></div>` : ''}
-    </div>`;
-
-  // ---- Patient card HTML helper ----
-  const ptCard = (p) => `
-    <div class="cyan-light rounded-xl p-5 hover-lift patient-card" data-id="${p.patient_id}">
-      <div class="flex items-center space-x-4 mb-4">
-        <div class="w-14 h-14 cyan-bg rounded-full flex items-center justify-center flex-shrink-0">
-          <i class="fas fa-user-injured text-xl text-white"></i>
-        </div>
-        <div>
-          <h3 class="text-base font-bold cyan-text patient-name">${p.full_name}</h3>
-          <p class="text-gray-500 text-xs">ID: ${p.patient_uuid || 'N/A'}</p>
-          <p class="text-xs cyan-text">${p.age || 'N/A'} yrs • ${p.gender || 'N/A'}</p>
-        </div>
-      </div>
-      <div class="space-y-2 mb-3 text-sm">
-        <div class="flex justify-between"><span class="cyan-text opacity-75">Blood Group:</span><span class="font-medium cyan-text">${p.blood_group || 'N/A'}</span></div>
-        <div class="flex justify-between"><span class="cyan-text opacity-75">Last Visit:</span><span class="cyan-text">${p.last_visit ? new Date(p.last_visit).toLocaleDateString() : 'N/A'}</span></div>
-      </div>
-      <div class="flex items-center justify-between pt-3 border-t border-gray-200">
-        <span class="status-badge status-active">Active</span>
-        <div class="flex space-x-2">
-          <button class="w-9 h-9 cyan-bg rounded-full flex items-center justify-center text-white view-patient-btn" title="View Profile" data-patient-id="${p.patient_id}"><i class="fas fa-user-md text-sm"></i></button>
-          <button class="w-9 h-9 btn-green rounded-full flex items-center justify-center text-white online-consult-btn" title="Online Consult" data-patient-id="${p.patient_id}" data-patient-name="${p.full_name}"><i class="fas fa-video text-sm"></i></button>
-          <button class="w-9 h-9 cyan-dark rounded-full flex items-center justify-center text-white message-patient-btn" title="Message" data-patient-id="${p.patient_id}" data-patient-name="${p.full_name}"><i class="fas fa-comment text-sm"></i></button>
-          <button class="w-9 h-9 btn-white rounded-full flex items-center justify-center cyan-text prescribe-btn" title="Prescribe" data-patient-id="${p.patient_id}" data-patient-name="${p.full_name}"><i class="fas fa-prescription text-sm"></i></button>
-        </div>
-      </div>
-    </div>`;
+  // Only expose doctorId to client — never expose full patient/report PII in page source
+  const clientDoctorId = JSON.stringify(doctor ? (doctor.doctor_id || null) : null);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -229,13 +318,13 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
       <div class="doctor-header-left flex items-center gap-6">
         <button id="profileBtn" class="w-20 h-20 cyan-bg rounded-full flex items-center justify-center text-2xl font-bold text-white hover-lift border-none cursor-pointer flex-shrink-0 overflow-hidden relative" style="padding:0">
           ${doctorData.photo_url
-            ? `<img src="${doctorData.photo_url}" alt="Profile" class="w-full h-full object-cover rounded-full" id="headerPhoto">`
-            : `<span id="headerPhoto">${initials}</span>`}
+            ? `<img src="${esc(doctorData.photo_url)}" alt="Profile" class="w-full h-full object-cover rounded-full" id="headerPhoto">`
+            : `<span id="headerPhoto">${esc(initials)}</span>`}
         </button>
         <div>
-          <h1 class="text-3xl font-bold cyan-text" id="headerDoctorName">${doctorData.name}</h1>
-          <p class="text-gray-600" id="headerDoctorMeta">${doctorData.designation} • ${doctorData.specialization}</p>
-          <p class="text-sm cyan-text">ID: ${doctorData.doctor_uuid}</p>
+          <h1 class="text-3xl font-bold cyan-text" id="headerDoctorName">${esc(doctorData.name)}</h1>
+          <p class="text-gray-600" id="headerDoctorMeta">${esc(doctorData.designation)} • ${esc(doctorData.specialization)}</p>
+          <p class="text-sm cyan-text">ID: ${esc(doctorData.doctor_uuid)}</p>
         </div>
       </div>
       <div class="flex gap-3">
@@ -313,7 +402,7 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
           </div>
           <div class="grid gap-4" id="appointmentsList">
             ${todaysAppointments.length > 0
-              ? todaysAppointments.map(aptCard).join('')
+              ? todaysAppointments.map(buildAptCardHTML).join('')
               : '<div class="text-center py-16 text-gray-400"><i class="fas fa-calendar-times text-5xl mb-4 block"></i><p class="text-lg">No appointments for today</p></div>'}
           </div>
           <div class="mt-6 cyan-light rounded-xl p-5">
@@ -337,7 +426,7 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
           </div>
           <div class="grid gap-4" id="reportsList">
             ${labReports.length > 0
-              ? labReports.map(rptCard).join('')
+              ? labReports.map(buildReportCardHTML).join('')
               : '<div class="text-center py-16 text-gray-400"><i class="fas fa-file-medical text-5xl mb-4 block"></i><p class="text-lg">No lab reports found</p></div>'}
           </div>
         </div>
@@ -356,7 +445,7 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
           </div>
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5" id="patientsList">
             ${patients.length > 0
-              ? patients.map(ptCard).join('')
+              ? patients.map(buildPatientCardHTML).join('')
               : '<div class="col-span-3 text-center py-16 text-gray-400"><i class="fas fa-users text-5xl mb-4 block"></i><p class="text-lg">No patients found</p></div>'}
           </div>
         </div>
@@ -387,15 +476,24 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
       <button class="modal-close text-gray-400 hover:text-gray-600 text-2xl" data-modal="profileModal">&times;</button>
     </div>
     <div class="flex flex-col md:flex-row items-center md:items-start gap-6 mb-8">
-      <div class="w-28 h-28 cyan-bg rounded-full flex items-center justify-center text-3xl font-bold text-white flex-shrink-0">${initials}</div>
+      <div class="w-28 h-28 cyan-bg rounded-full flex items-center justify-center text-3xl font-bold text-white flex-shrink-0">${esc(initials)}</div>
       <div>
-        <h3 class="text-2xl font-bold cyan-text">${doctorData.name}</h3>
-        <p class="text-lg cyan-text opacity-80 mt-1">${doctorData.designation}</p>
-        <p class="text-gray-600 mt-1">${doctorData.qualification}</p>
+        <h3 class="text-2xl font-bold cyan-text">${esc(doctorData.name)}</h3>
+        <p class="text-lg cyan-text opacity-80 mt-1">${esc(doctorData.designation)}</p>
+        <p class="text-gray-600 mt-1">${esc(doctorData.qualification)}</p>
       </div>
     </div>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-      ${[['Doctor ID', doctorData.doctor_uuid],['Specialization', doctorData.specialization],['Experience', doctorData.experience],['Consultation Fee', doctorData.consultation_fee],['Available Days', availDaysStr],['Available Time', doctorData.available_time],['Email', doctorData.email],['Contact', doctorData.contact]].map(([k,v])=>`<div class="cyan-light p-4 rounded-xl"><p class="text-xs cyan-text opacity-70">${k}</p><p class="font-semibold cyan-text mt-1">${v||'N/A'}</p></div>`).join('')}
+      ${[
+        ['Doctor ID', doctorData.doctor_uuid],
+        ['Specialization', doctorData.specialization],
+        ['Experience', doctorData.experience],
+        ['Consultation Fee', doctorData.consultation_fee],
+        ['Available Days', availDaysStr],
+        ['Available Time', doctorData.available_time],
+        ['Email', doctorData.email],
+        ['Contact', doctorData.contact]
+      ].map(([k, v]) => `<div class="cyan-light p-4 rounded-xl"><p class="text-xs cyan-text opacity-70">${esc(k)}</p><p class="font-semibold cyan-text mt-1">${esc(v || 'N/A')}</p></div>`).join('')}
     </div>
     <div class="flex justify-end gap-3">
       <button id="editFromProfileBtn" class="px-5 py-2.5 btn-cyan rounded-lg"><i class="fas fa-edit mr-2"></i>Edit Profile</button>
@@ -412,12 +510,11 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
       <button class="modal-close text-gray-400 hover:text-gray-600 text-2xl" data-modal="editProfileModal">&times;</button>
     </div>
     <form id="editProfileForm" class="space-y-4">
-      <!-- Photo upload -->
       <div class="flex items-center gap-5 p-4 cyan-light rounded-xl">
         <div class="w-20 h-20 cyan-bg rounded-full overflow-hidden flex items-center justify-center text-2xl font-bold text-white flex-shrink-0" id="photoPreviewWrap">
           ${doctorData.photo_url
-            ? `<img src="${doctorData.photo_url}" id="photoPreview" class="w-full h-full object-cover">`
-            : `<span id="photoPreview">${initials}</span>`}
+            ? `<img src="${esc(doctorData.photo_url)}" id="photoPreview" class="w-full h-full object-cover">`
+            : `<span id="photoPreview">${esc(initials)}</span>`}
         </div>
         <div>
           <p class="text-sm font-semibold cyan-text mb-1">Profile Photo</p>
@@ -434,18 +531,18 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
         </div>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div><label class="block text-sm font-medium cyan-text mb-1">Full Name</label><input type="text" id="editName" value="${doctorData.name}" class="form-input"></div>
-        <div><label class="block text-sm font-medium cyan-text mb-1">Designation</label><input type="text" id="editDesignation" value="${doctorData.designation}" class="form-input"></div>
-        <div><label class="block text-sm font-medium cyan-text mb-1">Specialization</label><input type="text" id="editSpecialization" value="${doctorData.specialization}" class="form-input"></div>
-        <div><label class="block text-sm font-medium cyan-text mb-1">Experience</label><input type="text" id="editExperience" value="${doctorData.experience}" class="form-input"></div>
-        <div><label class="block text-sm font-medium cyan-text mb-1">Qualification</label><input type="text" id="editQualification" value="${doctorData.qualification}" class="form-input"></div>
-        <div><label class="block text-sm font-medium cyan-text mb-1">Email</label><input type="email" id="editEmail" value="${doctorData.email}" class="form-input"></div>
-        <div><label class="block text-sm font-medium cyan-text mb-1">Contact</label><input type="text" id="editContact" value="${doctorData.contact}" class="form-input"></div>
-        <div><label class="block text-sm font-medium cyan-text mb-1">Consultation Fee</label><input type="text" id="editFee" value="${doctorData.consultation_fee}" class="form-input"></div>
-        <div><label class="block text-sm font-medium cyan-text mb-1">Available Days</label><input type="text" id="editDays" value="${availDaysStr}" class="form-input" placeholder="Mon, Wed, Fri"></div>
-        <div><label class="block text-sm font-medium cyan-text mb-1">Available Time</label><input type="text" id="editTime" value="${doctorData.available_time}" class="form-input" placeholder="9:00 AM - 5:00 PM"></div>
+        <div><label class="block text-sm font-medium cyan-text mb-1">Full Name</label><input type="text" id="editName" value="${esc(doctorData.name)}" class="form-input" required></div>
+        <div><label class="block text-sm font-medium cyan-text mb-1">Designation</label><input type="text" id="editDesignation" value="${esc(doctorData.designation)}" class="form-input"></div>
+        <div><label class="block text-sm font-medium cyan-text mb-1">Specialization</label><input type="text" id="editSpecialization" value="${esc(doctorData.specialization)}" class="form-input"></div>
+        <div><label class="block text-sm font-medium cyan-text mb-1">Experience</label><input type="text" id="editExperience" value="${esc(doctorData.experience)}" class="form-input"></div>
+        <div><label class="block text-sm font-medium cyan-text mb-1">Qualification</label><input type="text" id="editQualification" value="${esc(doctorData.qualification)}" class="form-input"></div>
+        <div><label class="block text-sm font-medium cyan-text mb-1">Email</label><input type="email" id="editEmail" value="${esc(doctorData.email)}" class="form-input" required></div>
+        <div><label class="block text-sm font-medium cyan-text mb-1">Contact</label><input type="text" id="editContact" value="${esc(doctorData.contact)}" class="form-input"></div>
+        <div><label class="block text-sm font-medium cyan-text mb-1">Consultation Fee</label><input type="text" id="editFee" value="${esc(doctorData.consultation_fee)}" class="form-input"></div>
+        <div><label class="block text-sm font-medium cyan-text mb-1">Available Days</label><input type="text" id="editDays" value="${esc(availDaysStr)}" class="form-input" placeholder="Mon, Wed, Fri"></div>
+        <div><label class="block text-sm font-medium cyan-text mb-1">Available Time</label><input type="text" id="editTime" value="${esc(doctorData.available_time)}" class="form-input" placeholder="9:00 AM - 5:00 PM"></div>
       </div>
-      <div><label class="block text-sm font-medium cyan-text mb-1">Address</label><textarea id="editAddress" rows="3" class="form-input">${doctorData.address}</textarea></div>
+      <div><label class="block text-sm font-medium cyan-text mb-1">Address</label><textarea id="editAddress" rows="3" class="form-input">${esc(doctorData.address)}</textarea></div>
       <div class="flex justify-end gap-3 pt-2">
         <button type="button" class="modal-close px-5 py-2.5 btn-white rounded-lg" data-modal="editProfileModal">Cancel</button>
         <button type="submit" class="px-5 py-2.5 btn-cyan rounded-lg"><i class="fas fa-save mr-2"></i>Save Changes</button>
@@ -487,7 +584,7 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
       <input type="hidden" id="findingsReportId">
       <div class="mb-4">
         <label class="block text-sm font-medium cyan-text mb-2">Clinical Findings</label>
-        <textarea id="findingsText" rows="6" class="form-input" placeholder="Enter your clinical observations and findings…"></textarea>
+        <textarea id="findingsText" rows="6" class="form-input" placeholder="Enter your clinical observations and findings…" required></textarea>
       </div>
       <div class="flex justify-end gap-3">
         <button type="button" class="modal-close px-5 py-2.5 btn-white rounded-lg" data-modal="findingsModal">Cancel</button>
@@ -570,7 +667,6 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
     <h2 class="text-2xl font-bold cyan-text mb-2">Online Consultation</h2>
     <p class="text-gray-600 mb-1">Patient: <span id="onlineConsultPatientName" class="font-semibold cyan-text"></span></p>
     <p class="text-sm text-gray-400 mb-4">A secure video call link will be sent to the patient.</p>
-    <!-- Schedule time picker (shown when scheduling for later) -->
     <div id="scheduleTimeRow" class="hidden mb-4 text-left">
       <label class="block text-sm font-medium cyan-text mb-1">Scheduled Date &amp; Time</label>
       <input type="datetime-local" id="scheduleDateTime" class="form-input w-full">
@@ -595,7 +691,7 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
     <form id="prescriptionForm">
       <input type="hidden" id="prescriptionPatientId">
       <div class="mb-4"><label class="block text-sm font-medium cyan-text mb-1">Patient</label><input type="text" id="prescriptionPatientName" readonly class="form-input bg-gray-50 cursor-not-allowed"></div>
-      <div class="mb-4"><label class="block text-sm font-medium cyan-text mb-1">Diagnosis</label><textarea id="prescriptionDiagnosis" rows="2" class="form-input" placeholder="Enter diagnosis…"></textarea></div>
+      <div class="mb-4"><label class="block text-sm font-medium cyan-text mb-1">Diagnosis</label><textarea id="prescriptionDiagnosis" rows="2" class="form-input" placeholder="Enter diagnosis…" required></textarea></div>
       <div class="mb-4">
         <label class="block text-sm font-medium cyan-text mb-2">Medications</label>
         <div id="medicationsList" class="space-y-2">
@@ -628,7 +724,7 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
       <div><label class="block text-sm font-medium cyan-text mb-2">Select Patient *</label>
         <select id="uploadPatientId" required class="form-select">
           <option value="">Choose a patient…</option>
-          ${patients.map(p => `<option value="${p.patient_id}">${p.full_name} (${p.patient_uuid || 'N/A'})</option>`).join('')}
+          ${patients.map(p => `<option value="${esc(p.patient_id)}">${esc(p.full_name)} (${esc(p.patient_uuid || 'N/A')})</option>`).join('')}
         </select>
       </div>
       <div><label class="block text-sm font-medium cyan-text mb-2">Test / Document Type *</label><input type="text" id="uploadTestType" required class="form-input" placeholder="e.g. Blood Test, X-Ray, ECG, MRI"></div>
@@ -752,14 +848,20 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
 
 <!-- ══════════════════ SCRIPTS ══════════════════ -->
 <script>
-const SERVER = {
-  patients:     ${JSON.stringify(patients)},
-  reports:      ${JSON.stringify(labReports)},
-  appointments: ${JSON.stringify(todaysAppointments)},
-  doctorId:     ${JSON.stringify(doctor ? (doctor.doctor_id || null) : null)}
-};
+// Only expose doctorId — never put full patient/report arrays into page source
+const SERVER = { doctorId: ${clientDoctorId} };
+
+// Reports page size constant
+const REPORTS_PAGE_SIZE = 50;
 
 document.addEventListener('DOMContentLoaded', () => {
+
+  // ─── HTML escape (client-side mirror of server esc()) ──
+  function escHTML(s) {
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(String(s ?? '')));
+    return d.innerHTML;
+  }
 
   // ─── Toast ──────────────────────────────────────
   const toastEl = document.getElementById('toast');
@@ -782,41 +884,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.querySelectorAll('.modal-close').forEach(b => b.addEventListener('click', () => closeModal(b.dataset.modal)));
 
-  // Global action relay used by view-report modal inline buttons
-  window._viewReportActions = {
-    findings: (id, existingFindings) => {
-      document.getElementById('findingsReportId').value = id;
-      document.getElementById('findingsText').value     = existingFindings || '';
-      closeModal('viewReportModal');
-      openModal('findingsModal');
-    },
-    download: (id, patient, type, date, findings) => {
-      // trigger same download logic as the card button
-      const btn = document.querySelector(\`.download-report-btn[data-id="\${id}"]\`);
-      if (btn) { btn.click(); return; }
-      // fallback if card not rendered (e.g. opened from a different tab)
-      printFallback(id, patient, type, date, findings);
-    },
-    share: (id) => {
-      document.getElementById('shareReportId').value = id;
-      document.getElementById('shareDoctorEmail').value = '';
-      document.getElementById('shareDoctorName').value  = '';
-      document.getElementById('outsideEmailSection').classList.add('hidden');
-      document.getElementById('outsideNameSection').classList.add('hidden');
-      document.querySelector('input[name="shareScope"][value="hospital"]').checked = true;
-      closeModal('viewReportModal');
-      openModal('shareReportModal');
-    }
-  };
-
+  // Close on backdrop click
   ['profileModal','editProfileModal','patientProfileModal','viewReportModal','findingsModal',
    'shareReportModal','chatModal','onlineConsultModal','prescriptionModal','uploadReportModal',
    'addPatientModal','applyLeaveModal','logoutConfirmModal','deleteReportModal'].forEach(id => {
-    document.getElementById(id)?.addEventListener('click', e => { if (e.target === document.getElementById(id)) closeModal(id); });
+    document.getElementById(id)?.addEventListener('click', e => {
+      if (e.target === document.getElementById(id)) closeModal(id);
+    });
   });
 
   // ─── Menu navigation ────────────────────────────
-  const sections = { appointments:'appointmentsContent', 'lab-reports':'labReportsContent', patients:'patientsContent', leave:'leaveContent' };
+  const sections = {
+    appointments: 'appointmentsContent',
+    'lab-reports': 'labReportsContent',
+    patients: 'patientsContent',
+    leave: 'leaveContent'
+  };
   document.querySelectorAll('.menu-item').forEach(item => {
     item.addEventListener('click', function () {
       document.querySelectorAll('.menu-item').forEach(i => i.classList.remove('active'));
@@ -830,13 +913,96 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // ─── Refresh appointments ────────────────────────
+  // ─── Shared card builders (client-side) ──────────
+  // These mirror the server-side builders, using escHTML for safety
+  function buildAptCardHTML(apt) {
+    const id   = escHTML(apt.appointment_id);
+    const pn   = escHTML(apt.patient_name);
+    const uuid = escHTML(apt.patient_uuid || 'N/A');
+    const pid  = escHTML(apt.patient_id);
+    const reason = escHTML(apt.reason || 'General Consultation');
+    const status = escHTML(apt.status || 'pending');
+    const time   = escHTML(apt.appointment_time ? String(apt.appointment_time).substring(0,5) : '--:--');
+    const isOnline = apt.appointment_type === 'online';
+    return \`
+      <div class="cyan-light rounded-xl p-5 hover-lift appointment-card" data-id="\${id}">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div class="flex items-center space-x-4">
+            <div class="w-14 h-14 cyan-bg rounded-full flex items-center justify-center flex-shrink-0"><i class="fas fa-user-injured text-xl text-white"></i></div>
+            <div>
+              <h3 class="text-lg font-bold cyan-text">\${pn}</h3>
+              <p class="text-gray-500 text-sm">ID: \${uuid}</p>
+              <p class="text-gray-700 text-sm mt-1"><i class="fas fa-stethoscope mr-1 cyan-text"></i>\${reason}</p>
+            </div>
+          </div>
+          <div class="flex flex-col items-start md:items-end gap-2">
+            <div class="flex items-center gap-3">
+              <span class="status-badge status-\${status}">\${status}</span>
+              <span class="text-lg font-bold cyan-text">\${time}</span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button class="px-3 py-1.5 btn-cyan rounded-lg text-sm start-consult-btn" data-id="\${id}" data-patient="\${pn}" data-patient-id="\${pid}"><i class="fas fa-play-circle mr-1"></i>Start Consult</button>
+              \${isOnline ? '<button class="px-3 py-1.5 btn-green rounded-lg text-sm video-btn" data-id="'+id+'"><i class="fas fa-video mr-1"></i>Video Call</button>' : ''}
+              <button class="px-3 py-1.5 btn-white rounded-lg text-sm reschedule-btn" data-id="\${id}">Reschedule</button>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-200">
+          <span class="text-xs cyan-text"><i class="fas fa-\${isOnline?'wifi':'hospital'} mr-1"></i>\${isOnline?'Online Consultation':'In-person Visit'}</span>
+          <div class="flex gap-2">
+            <button class="text-xs cyan-bg text-white px-3 py-1 rounded view-patient-history-btn" data-patient-id="\${pid}" data-patient-name="\${pn}"><i class="fas fa-file-medical mr-1"></i>History</button>
+            <button class="text-xs btn-white px-3 py-1 rounded message-patient-btn" data-patient-id="\${pid}" data-patient-name="\${pn}"><i class="fas fa-comment-medical mr-1"></i>Message</button>
+            <button class="text-xs btn-cyan px-3 py-1 rounded prescribe-btn" data-patient-id="\${pid}" data-patient-name="\${pn}"><i class="fas fa-prescription mr-1"></i>Prescribe</button>
+          </div>
+        </div>
+      </div>\`;
+  }
+
+  function buildReportCardHTML(r) {
+    const id       = escHTML(r.report_id);
+    const pn       = escHTML(r.patient_name);
+    const uuid     = escHTML(r.patient_uuid || 'N/A');
+    const testType = escHTML(r.test_type);
+    const status   = escHTML(r.status);
+    const findings = escHTML(r.findings || '');
+    const isECG    = r.test_type && r.test_type.toLowerCase().includes('ecg');
+    return \`
+      <div class="cyan-light rounded-xl p-5 hover-lift report-card" data-id="\${id}">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div class="flex items-center space-x-4">
+            <div class="w-14 h-14 \${r.status==='reviewed'?'cyan-bg':'cyan-dark'} rounded-full flex items-center justify-center flex-shrink-0">
+              <i class="fas \${isECG?'fa-heartbeat':'fa-vial'} text-xl text-white"></i>
+            </div>
+            <div>
+              <h3 class="text-lg font-bold cyan-text">\${pn}</h3>
+              <p class="text-gray-500 text-sm">ID: \${uuid}</p>
+              <p class="text-gray-700 text-sm mt-1"><i class="fas fa-flask mr-1 cyan-text"></i>\${testType}</p>
+            </div>
+          </div>
+          <div class="flex flex-col items-start md:items-end gap-2">
+            <div class="flex items-center gap-3">
+              <span class="status-badge status-\${status}">\${status}</span>
+              <span class="text-sm cyan-text">\${new Date(r.test_date).toLocaleDateString()}</span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button class="px-3 py-1.5 btn-cyan rounded-lg text-sm view-report-btn" data-id="\${id}"><i class="fas fa-eye mr-1"></i>View</button>
+              <button class="px-3 py-1.5 btn-white rounded-lg text-sm write-findings-btn" data-id="\${id}" data-findings="\${findings}">\${r.status==='reviewed'?'Update':'Add Findings'}</button>
+              <button class="px-3 py-1.5 btn-white rounded-lg text-sm download-report-btn" data-id="\${id}" data-patient="\${pn}" data-type="\${testType}" data-date="\${escHTML(r.test_date)}" data-findings="\${findings}"><i class="fas fa-download mr-1"></i>PDF</button>
+              <button class="px-3 py-1.5 btn-white rounded-lg text-sm share-report-btn" data-id="\${id}"><i class="fas fa-share-alt mr-1"></i>Share</button>
+              <button class="px-3 py-1.5 btn-red rounded-lg text-sm delete-report-btn" data-id="\${id}" data-patient="\${pn}" data-type="\${testType}"><i class="fas fa-trash mr-1"></i>Delete</button>
+            </div>
+          </div>
+        </div>
+        \${r.findings ? '<div class="mt-3 p-3 white-card rounded-lg border-l-4 cyan-border"><p class="text-xs cyan-text font-semibold mb-1">Findings:</p><p class="text-sm text-gray-700">'+findings+'</p></div>' : ''}
+      </div>\`;
+  }
+
+  // ─── Refresh appointments ─────────────────────────
   async function refreshAppointments() {
     try {
       const res  = await fetch('/api/doctor/appointments/today');
       if (!res.ok) throw new Error('Server error ' + res.status);
       const data = await res.json();
-      // Update stats
       document.getElementById('sidebarApptCount').textContent = data.length;
       document.getElementById('statAppointments').textContent = data.length;
       document.getElementById('summaryConfirmed').textContent = data.filter(a => a.status === 'confirmed').length;
@@ -844,59 +1010,46 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('summaryInPerson').textContent  = data.filter(a => a.appointment_type === 'in-person').length;
       renderAppointments(data);
       showToast('Refreshed', 'Appointments updated from database', 'success');
-    } catch(e) { showToast('Error', e.message, 'error'); }
+    } catch(e) {
+      console.error('refreshAppointments error:', e);
+      showToast('Error', e.message, 'error');
+    }
   }
   document.getElementById('refreshAppointmentsBtn')?.addEventListener('click', refreshAppointments);
 
   function renderAppointments(list) {
     const el = document.getElementById('appointmentsList');
-    if (!list.length) { el.innerHTML = '<div class="text-center py-16 text-gray-400"><i class="fas fa-calendar-times text-5xl mb-4 block"></i><p>No appointments today</p></div>'; return; }
-    el.innerHTML = list.map(apt => \`
-      <div class="cyan-light rounded-xl p-5 hover-lift appointment-card" data-id="\${apt.appointment_id}">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div class="flex items-center space-x-4">
-            <div class="w-14 h-14 cyan-bg rounded-full flex items-center justify-center flex-shrink-0"><i class="fas fa-user-injured text-xl text-white"></i></div>
-            <div>
-              <h3 class="text-lg font-bold cyan-text">\${apt.patient_name}</h3>
-              <p class="text-gray-500 text-sm">ID: \${apt.patient_uuid || 'N/A'}</p>
-              <p class="text-gray-700 text-sm mt-1"><i class="fas fa-stethoscope mr-1 cyan-text"></i>\${apt.reason || 'General Consultation'}</p>
-            </div>
-          </div>
-          <div class="flex flex-col items-start md:items-end gap-2">
-            <div class="flex items-center gap-3">
-              <span class="status-badge status-\${apt.status||'pending'}">\${apt.status||'pending'}</span>
-              <span class="text-lg font-bold cyan-text">\${apt.appointment_time ? apt.appointment_time.substring(0,5) : '--:--'}</span>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <button class="px-3 py-1.5 btn-cyan rounded-lg text-sm start-consult-btn" data-id="\${apt.appointment_id}" data-patient="\${apt.patient_name}" data-patient-id="\${apt.patient_id}"><i class="fas fa-play-circle mr-1"></i>Start Consult</button>
-              \${apt.appointment_type==='online'?'<button class="px-3 py-1.5 btn-green rounded-lg text-sm video-btn" data-id="'+apt.appointment_id+'"><i class="fas fa-video mr-1"></i>Video Call</button>':''}
-              <button class="px-3 py-1.5 btn-white rounded-lg text-sm reschedule-btn" data-id="\${apt.appointment_id}">Reschedule</button>
-            </div>
-          </div>
-        </div>
-        <div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-200">
-          <span class="text-xs cyan-text"><i class="fas fa-\${apt.appointment_type==='online'?'wifi':'hospital'} mr-1"></i>\${apt.appointment_type==='online'?'Online':'In-person'}</span>
-          <div class="flex gap-2">
-            <button class="text-xs cyan-bg text-white px-3 py-1 rounded view-patient-history-btn" data-patient-id="\${apt.patient_id}" data-patient-name="\${apt.patient_name}"><i class="fas fa-file-medical mr-1"></i>History</button>
-            <button class="text-xs btn-white px-3 py-1 rounded message-patient-btn" data-patient-id="\${apt.patient_id}" data-patient-name="\${apt.patient_name}"><i class="fas fa-comment-medical mr-1"></i>Message</button>
-            <button class="text-xs btn-cyan px-3 py-1 rounded prescribe-btn" data-patient-id="\${apt.patient_id}" data-patient-name="\${apt.patient_name}"><i class="fas fa-prescription mr-1"></i>Prescribe</button>
-          </div>
-        </div>
-      </div>\`).join('');
+    if (!list.length) {
+      el.innerHTML = '<div class="text-center py-16 text-gray-400"><i class="fas fa-calendar-times text-5xl mb-4 block"></i><p>No appointments today</p></div>';
+      return;
+    }
+    el.innerHTML = list.map(buildAptCardHTML).join('');
     attachApptListeners();
   }
 
   function attachApptListeners() {
-    document.querySelectorAll('.start-consult-btn').forEach(b => b.addEventListener('click', function(){ showToast('Consultation', 'Starting with '+this.dataset.patient, 'success'); }));
-    document.querySelectorAll('.video-btn').forEach(b => b.addEventListener('click', function(){ showToast('Video Call', 'Initiating video consultation…', 'info'); }));
-    document.querySelectorAll('.reschedule-btn').forEach(b => b.addEventListener('click', function(){ showToast('Reschedule', 'Appt #'+this.dataset.id+' — reschedule UI coming soon', 'info'); }));
-    document.querySelectorAll('.view-patient-history-btn').forEach(b => b.addEventListener('click', function(){ openPatientProfile(this.dataset.patientId); }));
-    document.querySelectorAll('.message-patient-btn').forEach(b => b.addEventListener('click', function(){ openChat(this.dataset.patientId, this.dataset.patientName); }));
-    document.querySelectorAll('.prescribe-btn').forEach(b => b.addEventListener('click', function(){ openPrescription(this.dataset.patientId, this.dataset.patientName); }));
+    document.querySelectorAll('.start-consult-btn').forEach(b => b.addEventListener('click', function(){
+      showToast('Consultation', 'Starting with ' + this.dataset.patient, 'success');
+    }));
+    document.querySelectorAll('.video-btn').forEach(b => b.addEventListener('click', function(){
+      showToast('Video Call', 'Initiating video consultation…', 'info');
+    }));
+    document.querySelectorAll('.reschedule-btn').forEach(b => b.addEventListener('click', function(){
+      showToast('Reschedule', 'Appt #' + this.dataset.id + ' — reschedule UI coming soon', 'info');
+    }));
+    document.querySelectorAll('.view-patient-history-btn').forEach(b => b.addEventListener('click', function(){
+      window.openPatientProfile(this.dataset.patientId);
+    }));
+    document.querySelectorAll('.message-patient-btn').forEach(b => b.addEventListener('click', function(){
+      window.openChat(this.dataset.patientId, this.dataset.patientName);
+    }));
+    document.querySelectorAll('.prescribe-btn').forEach(b => b.addEventListener('click', function(){
+      window.openPrescription(this.dataset.patientId, this.dataset.patientName);
+    }));
   }
   attachApptListeners();
 
-  // ─── Refresh reports ─────────────────────────────
+  // ─── Refresh reports ──────────────────────────────
   async function refreshReports() {
     try {
       const res  = await fetch('/api/doctor/reports');
@@ -906,42 +1059,20 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('statReports').textContent = data.filter(r => r.status === 'pending').length;
       renderReports(data);
       showToast('Refreshed', 'Lab reports updated', 'success');
-    } catch(e) { showToast('Error', e.message, 'error'); }
+    } catch(e) {
+      console.error('refreshReports error:', e);
+      showToast('Error', e.message, 'error');
+    }
   }
   document.getElementById('refreshReportsBtn')?.addEventListener('click', refreshReports);
 
   function renderReports(list) {
     const el = document.getElementById('reportsList');
-    if (!list.length) { el.innerHTML = '<div class="text-center py-16 text-gray-400"><i class="fas fa-file-medical text-5xl mb-4 block"></i><p>No lab reports found</p></div>'; return; }
-    el.innerHTML = list.map(r => \`
-      <div class="cyan-light rounded-xl p-5 hover-lift report-card" data-id="\${r.report_id}">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div class="flex items-center space-x-4">
-            <div class="w-14 h-14 \${r.status==='reviewed'?'cyan-bg':'cyan-dark'} rounded-full flex items-center justify-center flex-shrink-0">
-              <i class="fas \${r.test_type&&r.test_type.toLowerCase().includes('ecg')?'fa-heartbeat':'fa-vial'} text-xl text-white"></i>
-            </div>
-            <div>
-              <h3 class="text-lg font-bold cyan-text">\${r.patient_name}</h3>
-              <p class="text-gray-500 text-sm">ID: \${r.patient_uuid||'N/A'}</p>
-              <p class="text-gray-700 text-sm mt-1"><i class="fas fa-flask mr-1 cyan-text"></i>\${r.test_type}</p>
-            </div>
-          </div>
-          <div class="flex flex-col items-start md:items-end gap-2">
-            <div class="flex items-center gap-3">
-              <span class="status-badge status-\${r.status}">\${r.status}</span>
-              <span class="text-sm cyan-text">\${new Date(r.test_date).toLocaleDateString()}</span>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <button class="px-3 py-1.5 btn-cyan rounded-lg text-sm view-report-btn" data-id="\${r.report_id}"><i class="fas fa-eye mr-1"></i>View</button>
-              <button class="px-3 py-1.5 btn-white rounded-lg text-sm write-findings-btn" data-id="\${r.report_id}" data-findings="\${(r.findings||'').replace(/"/g,'&quot;')}">\${r.status==='reviewed'?'Update':'Add Findings'}</button>
-              <button class="px-3 py-1.5 btn-white rounded-lg text-sm download-report-btn" data-id="\${r.report_id}" data-patient="\${r.patient_name}" data-type="\${r.test_type}" data-date="\${r.test_date}" data-findings="\${(r.findings||'').replace(/"/g,'&quot;')}"><i class="fas fa-download mr-1"></i>PDF</button>
-              <button class="px-3 py-1.5 btn-white rounded-lg text-sm share-report-btn" data-id="\${r.report_id}"><i class="fas fa-share-alt mr-1"></i>Share</button>
-              <button class="px-3 py-1.5 btn-red rounded-lg text-sm delete-report-btn" data-id="\${r.report_id}" data-patient="\${r.patient_name}" data-type="\${r.test_type}"><i class="fas fa-trash mr-1"></i>Delete</button>
-            </div>
-          </div>
-        </div>
-        \${r.findings?'<div class="mt-3 p-3 white-card rounded-lg border-l-4 cyan-border"><p class="text-xs cyan-text font-semibold mb-1">Findings:</p><p class="text-sm text-gray-700">'+r.findings+'</p></div>':''}
-      </div>\`).join('');
+    if (!list.length) {
+      el.innerHTML = '<div class="text-center py-16 text-gray-400"><i class="fas fa-file-medical text-5xl mb-4 block"></i><p>No lab reports found</p></div>';
+      return;
+    }
+    el.innerHTML = list.map(buildReportCardHTML).join('');
     attachReportListeners();
     attachDeleteReportListeners();
   }
@@ -956,24 +1087,52 @@ document.addEventListener('DOMContentLoaded', () => {
           const res = await fetch(\`/api/doctor/report/\${this.dataset.id}\`);
           if (!res.ok) throw new Error('Report not found');
           const r = await res.json();
+          const rId   = escHTML(r.report_id);
+          const rPn   = escHTML(r.patient_name);
+          const rUuid = escHTML(r.patient_uuid || 'N/A');
+          const rType = escHTML(r.test_type);
+          const rStat = escHTML(r.status);
+          const rFind = escHTML(r.findings || '');
+          const rDate = escHTML(r.test_date);
+          const rCreated = r.created_at ? new Date(r.created_at).toLocaleDateString() : 'N/A';
           document.getElementById('reportViewContent').innerHTML = \`
             <div class="space-y-4">
               <div class="flex items-center gap-4 p-4 cyan-light rounded-xl">
                 <div class="w-16 h-16 \${r.status==='reviewed'?'cyan-bg':'cyan-dark'} rounded-full flex items-center justify-center flex-shrink-0"><i class="fas fa-vial text-2xl text-white"></i></div>
-                <div><h3 class="text-xl font-bold cyan-text">\${r.patient_name}</h3><p class="text-gray-500 text-sm">ID: \${r.patient_uuid||'N/A'}</p></div>
+                <div><h3 class="text-xl font-bold cyan-text">\${rPn}</h3><p class="text-gray-500 text-sm">ID: \${rUuid}</p></div>
               </div>
               <div class="grid grid-cols-2 gap-3">
-                \${[['Test Type',r.test_type],['Date',new Date(r.test_date).toLocaleDateString()],['Status','<span class="status-badge status-'+r.status+'">'+r.status+'</span>'],['Uploaded',r.created_at?new Date(r.created_at).toLocaleDateString():'N/A']].map(([k,v])=>'<div class="cyan-light p-3 rounded-xl"><p class="text-xs cyan-text opacity-70">'+k+'</p><p class="font-semibold cyan-text mt-1">'+v+'</p></div>').join('')}
+                <div class="cyan-light p-3 rounded-xl"><p class="text-xs cyan-text opacity-70">Test Type</p><p class="font-semibold cyan-text mt-1">\${rType}</p></div>
+                <div class="cyan-light p-3 rounded-xl"><p class="text-xs cyan-text opacity-70">Date</p><p class="font-semibold cyan-text mt-1">\${new Date(r.test_date).toLocaleDateString()}</p></div>
+                <div class="cyan-light p-3 rounded-xl"><p class="text-xs cyan-text opacity-70">Status</p><p class="font-semibold cyan-text mt-1"><span class="status-badge status-\${rStat}">\${rStat}</span></p></div>
+                <div class="cyan-light p-3 rounded-xl"><p class="text-xs cyan-text opacity-70">Uploaded</p><p class="font-semibold cyan-text mt-1">\${rCreated}</p></div>
               </div>
-              \${r.findings?'<div class="p-4 bg-blue-50 rounded-xl border-l-4 border-blue-400"><p class="text-sm font-semibold text-blue-700 mb-1">Clinical Findings</p><p class="text-gray-700">'+r.findings+'</p></div>':'<p class="text-gray-400 italic text-sm">No findings added yet.</p>'}
-              \${r.file_url?'<a href="'+r.file_url+'" target="_blank" class="flex items-center gap-2 p-3 cyan-light rounded-xl cyan-text hover:opacity-80"><i class="fas fa-file-download"></i><span>View Attached File</span></a>':''}
+              \${r.findings ? '<div class="p-4 bg-blue-50 rounded-xl border-l-4 border-blue-400"><p class="text-sm font-semibold text-blue-700 mb-1">Clinical Findings</p><p class="text-gray-700">'+rFind+'</p></div>' : '<p class="text-gray-400 italic text-sm">No findings added yet.</p>'}
+              \${r.file_url ? '<a href="'+escHTML(r.file_url)+'" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 p-3 cyan-light rounded-xl cyan-text hover:opacity-80"><i class="fas fa-file-download"></i><span>View Attached File</span></a>' : ''}
               <div class="flex gap-3 pt-2 flex-wrap">
-                <button class="px-4 py-2 btn-white rounded-lg text-sm" onclick="window._viewReportActions.findings('\${r.report_id}',\${JSON.stringify(r.findings||'')})"><i class="fas fa-edit mr-1"></i>\${r.status==='reviewed'?'Update Findings':'Add Findings'}</button>
-                <button class="px-4 py-2 btn-white rounded-lg text-sm" onclick="window._viewReportActions.download('\${r.report_id}',\${JSON.stringify(r.patient_name)},\${JSON.stringify(r.test_type)},\${JSON.stringify(r.test_date)},\${JSON.stringify(r.findings||'')})"><i class="fas fa-download mr-1"></i>Download PDF</button>
-                <button class="px-4 py-2 btn-cyan rounded-lg text-sm" onclick="window._viewReportActions.share('\${r.report_id}')"><i class="fas fa-share-alt mr-1"></i>Share</button>
+                <button class="px-4 py-2 btn-white rounded-lg text-sm" id="viewFindingsBtn"><i class="fas fa-edit mr-1"></i>\${r.status==='reviewed'?'Update Findings':'Add Findings'}</button>
+                <button class="px-4 py-2 btn-white rounded-lg text-sm" id="viewDownloadBtn"><i class="fas fa-download mr-1"></i>Download PDF</button>
+                <button class="px-4 py-2 btn-cyan rounded-lg text-sm" id="viewShareBtn"><i class="fas fa-share-alt mr-1"></i>Share</button>
               </div>
             </div>\`;
-        } catch(err) { document.getElementById('reportViewContent').innerHTML = '<p class="text-red-500 text-center py-8">'+err.message+'</p>'; }
+          // Attach inline modal buttons safely (no inline event handlers)
+          document.getElementById('viewFindingsBtn')?.addEventListener('click', () => {
+            document.getElementById('findingsReportId').value = rId;
+            document.getElementById('findingsText').value     = r.findings || '';
+            closeModal('viewReportModal');
+            openModal('findingsModal');
+          });
+          document.getElementById('viewDownloadBtn')?.addEventListener('click', () => {
+            triggerDownload(rId, r.patient_name, r.test_type, r.test_date, r.findings || '');
+          });
+          document.getElementById('viewShareBtn')?.addEventListener('click', () => {
+            openShareModal(rId);
+            closeModal('viewReportModal');
+          });
+        } catch(err) {
+          console.error('view report error:', err);
+          document.getElementById('reportViewContent').innerHTML = '<p class="text-red-500 text-center py-8">' + escHTML(err.message) + '</p>';
+        }
       });
     });
 
@@ -981,54 +1140,73 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.write-findings-btn').forEach(b => {
       b.addEventListener('click', function () {
         document.getElementById('findingsReportId').value = this.dataset.id;
-        document.getElementById('findingsText').value = (this.dataset.findings || '').replace(/&quot;/g, '"');
+        document.getElementById('findingsText').value     = this.dataset.findings || '';
         openModal('findingsModal');
       });
     });
 
     // Download PDF
     document.querySelectorAll('.download-report-btn').forEach(b => {
-      b.addEventListener('click', async function () {
-        const { id, patient, type, date, findings } = this.dataset;
-        showToast('Generating', 'Preparing PDF…', 'info');
-        try {
-          const res = await fetch(\`/api/doctor/report/\${id}/download\`);
-          if (res.ok) {
-            const blob = await res.blob();
-            const url  = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href=url; a.download='report_'+id+'.pdf';
-            document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
-            showToast('Downloaded', 'PDF saved', 'success');
-          } else { printFallback(id, patient, type, date, (findings||'').replace(/&quot;/g,'"')); }
-        } catch { printFallback(id, patient, type, date, (findings||'').replace(/&quot;/g,'"')); }
+      b.addEventListener('click', function () {
+        triggerDownload(this.dataset.id, this.dataset.patient, this.dataset.type, this.dataset.date, this.dataset.findings || '');
       });
     });
 
     // Share
     document.querySelectorAll('.share-report-btn').forEach(b => {
-      b.addEventListener('click', function () {
-        document.getElementById('shareReportId').value = this.dataset.id;
-        document.getElementById('shareDoctorEmail').value = '';
-        document.getElementById('shareDoctorName').value = '';
-        document.getElementById('outsideEmailSection').classList.add('hidden');
-        document.getElementById('outsideNameSection').classList.add('hidden');
-        document.querySelector('input[name="shareScope"][value="hospital"]').checked = true;
-        openModal('shareReportModal');
-      });
+      b.addEventListener('click', function () { openShareModal(this.dataset.id); });
     });
   }
   attachReportListeners();
+
+  // ─── Download helper ──────────────────────────────
+  async function triggerDownload(id, patient, type, date, findings) {
+    showToast('Generating', 'Preparing PDF…', 'info');
+    try {
+      const res = await fetch(\`/api/doctor/report/\${id}/download\`);
+      if (res.ok) {
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'report_' + id + '.pdf';
+        document.body.appendChild(a); a.click();
+        URL.revokeObjectURL(url); a.remove();
+        showToast('Downloaded', 'PDF saved', 'success');
+      } else {
+        printFallback(id, patient, type, date, findings);
+      }
+    } catch {
+      printFallback(id, patient, type, date, findings);
+    }
+  }
+
+  // ─── Share modal helper ───────────────────────────
+  function openShareModal(reportId) {
+    document.getElementById('shareReportId').value         = reportId;
+    document.getElementById('shareDoctorEmail').value      = '';
+    document.getElementById('shareDoctorName').value       = '';
+    document.getElementById('outsideEmailSection').classList.add('hidden');
+    document.getElementById('outsideNameSection').classList.add('hidden');
+    document.querySelector('input[name="shareScope"][value="hospital"]').checked = true;
+    openModal('shareReportModal');
+  }
 
   // Findings form
   document.getElementById('findingsForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const id       = document.getElementById('findingsReportId').value;
-    const findings = document.getElementById('findingsText').value;
+    const findings = document.getElementById('findingsText').value.trim();
+    if (!findings) { showToast('Error', 'Please enter findings', 'error'); return; }
     try {
-      const res = await fetch(\`/api/doctor/report/\${id}/findings\`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ findings }) });
+      const res = await fetch(\`/api/doctor/report/\${id}/findings\`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ findings })
+      });
       if (res.ok) { showToast('Saved', 'Findings saved successfully!', 'success'); closeModal('findingsModal'); await refreshReports(); }
-      else { const e = await res.json().catch(()=>({})); showToast('Error', e.message||'Failed to save', 'error'); }
-    } catch(err) { showToast('Error', err.message, 'error'); }
+      else { const err = await res.json().catch(()=>({})); showToast('Error', err.message||'Failed to save', 'error'); }
+    } catch(err) {
+      console.error('findings submit error:', err);
+      showToast('Error', err.message, 'error');
+    }
   });
 
   // Share form
@@ -1043,36 +1221,52 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     const id    = document.getElementById('shareReportId').value;
     const scope = document.querySelector('input[name="shareScope"]:checked')?.value;
-    const email = document.getElementById('shareDoctorEmail').value;
-    const name  = document.getElementById('shareDoctorName').value;
+    const email = document.getElementById('shareDoctorEmail').value.trim();
+    const name  = document.getElementById('shareDoctorName').value.trim();
     if (scope === 'outside' && !email) { showToast('Error', "Please enter the doctor's email", 'error'); return; }
     try {
-      const res = await fetch(\`/api/doctor/report/\${id}/share\`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ scope, email: email||null, doctor_name: name||null }) });
+      const res = await fetch(\`/api/doctor/report/\${id}/share\`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ scope, email: email || null, doctor_name: name || null })
+      });
       if (res.ok) {
         const msg = scope==='hospital'?'Shared with all hospital doctors':scope==='all'?'Shared with all platform doctors':'Shared with '+email;
         showToast('Shared!', msg, 'success'); closeModal('shareReportModal');
       } else { showToast('Error', 'Failed to share report', 'error'); }
-    } catch(err) { showToast('Error', err.message, 'error'); }
+    } catch(err) {
+      console.error('share report error:', err);
+      showToast('Error', err.message, 'error');
+    }
   });
 
-  // PDF fallback
+  // PDF fallback: use hidden iframe instead of window.open (less likely to be blocked)
   function printFallback(id, patient, type, date, findings) {
-    const w = window.open('', '_blank');
-    w.document.write(\`<!DOCTYPE html><html><head><title>Lab Report</title>
+    const html = \`<!DOCTYPE html><html><head><title>Lab Report</title>
       <style>body{font-family:Arial,sans-serif;padding:40px;color:#333}h1{color:#006064}.row{display:flex;gap:16px;margin-bottom:10px}.label{font-weight:bold;min-width:140px;color:#006064}.box{background:#f0f9ff;padding:16px;border-radius:8px;border-left:4px solid #00bcd4;margin-top:16px}</style>
       </head><body><h1>BondHealth Lab Report</h1><hr>
-      <div class="row"><span class="label">Patient:</span><span>\${patient}</span></div>
-      <div class="row"><span class="label">Test Type:</span><span>\${type}</span></div>
-      <div class="row"><span class="label">Test Date:</span><span>\${new Date(date).toLocaleDateString()}</span></div>
-      <div class="row"><span class="label">Report ID:</span><span>\${id}</span></div>
-      \${findings?'<div class="box"><strong>Findings:</strong><p>'+findings+'</p></div>':''}
-      <br><script>window.print()<\\/script></body></html>\`);
-    w.document.close();
+      <div class="row"><span class="label">Patient:</span><span>\${escHTML(patient)}</span></div>
+      <div class="row"><span class="label">Test Type:</span><span>\${escHTML(type)}</span></div>
+      <div class="row"><span class="label">Test Date:</span><span>\${escHTML(new Date(date).toLocaleDateString())}</span></div>
+      <div class="row"><span class="label">Report ID:</span><span>\${escHTML(id)}</span></div>
+      \${findings ? '<div class="box"><strong>Findings:</strong><p>'+escHTML(findings)+'</p></div>' : ''}
+      </body></html>\`;
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;width:0;height:0;border:0';
+    document.body.appendChild(iframe);
+    iframe.contentWindow.document.open();
+    iframe.contentWindow.document.write(html);
+    iframe.contentWindow.document.close();
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+    setTimeout(() => iframe.remove(), 1000);
     showToast('PDF', 'Print dialog opened', 'success');
   }
 
-  // ─── Upload Document ─────────────────────────────
-  const openUpload = () => { document.getElementById('uploadTestDate').valueAsDate = new Date(); openModal('uploadReportModal'); };
+  // ─── Upload Document ──────────────────────────────
+  const openUpload = () => {
+    document.getElementById('uploadTestDate').valueAsDate = new Date();
+    openModal('uploadReportModal');
+  };
   document.getElementById('uploadReportBtn')?.addEventListener('click', openUpload);
   document.querySelector('.quick-action[data-action="upload-document"]')?.addEventListener('click', openUpload);
 
@@ -1082,9 +1276,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!patientId) { showToast('Error', 'Please select a patient', 'error'); return; }
     const fd = new FormData();
     fd.append('patient_id', patientId);
-    fd.append('test_type',  document.getElementById('uploadTestType').value);
+    fd.append('test_type',  document.getElementById('uploadTestType').value.trim());
     fd.append('test_date',  document.getElementById('uploadTestDate').value);
-    fd.append('findings',   document.getElementById('uploadFindings').value);
+    fd.append('findings',   document.getElementById('uploadFindings').value.trim());
     const file = document.getElementById('uploadFile').files[0];
     if (file) fd.append('file', file);
     try {
@@ -1094,10 +1288,13 @@ document.addEventListener('DOMContentLoaded', () => {
         closeModal('uploadReportModal'); e.target.reset();
         await refreshReports();
       } else { const err = await res.json().catch(()=>({})); showToast('Error', err.message||'Upload failed', 'error'); }
-    } catch(err) { showToast('Error', err.message, 'error'); }
+    } catch(err) {
+      console.error('upload error:', err);
+      showToast('Error', err.message, 'error');
+    }
   });
 
-  // ─── Profile ─────────────────────────────────────
+  // ─── Profile ──────────────────────────────────────
   document.getElementById('profileBtn')?.addEventListener('click', () => openModal('profileModal'));
   document.getElementById('editProfileHeaderBtn')?.addEventListener('click', () => openModal('editProfileModal'));
   document.getElementById('editFromProfileBtn')?.addEventListener('click', () => { closeModal('profileModal'); openModal('editProfileModal'); });
@@ -1105,37 +1302,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('editProfileForm')?.addEventListener('submit', async e => {
     e.preventDefault();
+    const name = document.getElementById('editName').value.trim();
+    const email = document.getElementById('editEmail').value.trim();
+    if (!name) { showToast('Error', 'Full name is required', 'error'); return; }
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Error', 'Valid email is required', 'error'); return; }
+
     const photoFile = document.getElementById('editPhotoFile')?.files[0];
     const body = {
-      full_name:        document.getElementById('editName').value,
-      designation:      document.getElementById('editDesignation').value,
-      specialization:   document.getElementById('editSpecialization').value,
-      experience:       document.getElementById('editExperience').value,
-      qualification:    document.getElementById('editQualification').value,
-      email:            document.getElementById('editEmail').value,
-      contact:          document.getElementById('editContact').value,
-      consultation_fee: document.getElementById('editFee').value,
-      available_days:   document.getElementById('editDays').value,
-      available_time:   document.getElementById('editTime').value,
-      address:          document.getElementById('editAddress').value
+      full_name:        name,
+      designation:      document.getElementById('editDesignation').value.trim(),
+      specialization:   document.getElementById('editSpecialization').value.trim(),
+      experience:       document.getElementById('editExperience').value.trim(),
+      qualification:    document.getElementById('editQualification').value.trim(),
+      email,
+      contact:          document.getElementById('editContact').value.trim(),
+      consultation_fee: document.getElementById('editFee').value.trim(),
+      available_days:   document.getElementById('editDays').value.trim(),
+      available_time:   document.getElementById('editTime').value.trim(),
+      address:          document.getElementById('editAddress').value.trim()
     };
     try {
-      // Step 1: save profile fields
-      const res = await fetch('/api/doctor/profile/update', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const res = await fetch('/api/doctor/profile/update', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+      });
       if (!res.ok) { const err = await res.json().catch(()=>({})); showToast('Error', err.message||'Update failed', 'error'); return; }
 
-      // Step 2: upload photo if selected
       if (photoFile) {
-        const fd = new FormData();
-        fd.append('photo', photoFile);
+        const fd = new FormData(); fd.append('photo', photoFile);
         const photoRes = await fetch('/api/doctor/profile/photo', { method: 'POST', body: fd });
         if (photoRes.ok) {
           const { photo_url } = await photoRes.json();
-          // Update header avatar
-          const headerPhoto = document.getElementById('headerPhoto');
-          const profileBtn  = document.getElementById('profileBtn');
           if (photo_url) {
-            profileBtn.innerHTML = \`<img src="\${photo_url}" alt="Profile" class="w-full h-full object-cover rounded-full" id="headerPhoto">\`;
+            const profileBtn = document.getElementById('profileBtn');
+            profileBtn.innerHTML = \`<img src="\${escHTML(photo_url)}" alt="Profile" class="w-full h-full object-cover rounded-full" id="headerPhoto">\`;
           }
         }
       }
@@ -1144,14 +1343,17 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('headerDoctorMeta').textContent = body.designation + ' • ' + body.specialization;
       showToast('Saved', 'Profile updated!', 'success');
       closeModal('editProfileModal');
-    } catch(err) { showToast('Error', err.message, 'error'); }
+    } catch(err) {
+      console.error('profile update error:', err);
+      showToast('Error', err.message, 'error');
+    }
   });
 
   // ─── Logout ───────────────────────────────────────
   document.getElementById('logoutHeaderBtn')?.addEventListener('click', () => openModal('logoutConfirmModal'));
   document.getElementById('cancelLogout')?.addEventListener('click', () => closeModal('logoutConfirmModal'));
   document.getElementById('confirmLogout')?.addEventListener('click', async () => {
-    try { await fetch('/api/logout', { method:'POST' }); } catch {}
+    try { await fetch('/api/logout', { method:'POST' }); } catch(e) { console.error('logout error:', e); }
     window.location.href = '/';
   });
 
@@ -1163,35 +1365,45 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch(\`/api/doctor/patient/\${patientId}\`);
       if (!res.ok) throw new Error('Patient not found');
       const p = await res.json();
-      const init = p.full_name ? p.full_name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2) : 'P';
+      const init = p.full_name ? p.full_name.split(' ').filter(Boolean).map(n=>n[0]??'').join('').toUpperCase().slice(0,2) : 'P';
+      const pid  = escHTML(p.patient_id);
+      const pfn  = escHTML(p.full_name);
       document.getElementById('patientProfileContent').innerHTML = \`
         <div class="flex items-center gap-5 mb-5 p-4 cyan-light rounded-xl">
-          <div class="w-20 h-20 cyan-bg rounded-full flex items-center justify-center text-2xl font-bold text-white flex-shrink-0">\${init}</div>
+          <div class="w-20 h-20 cyan-bg rounded-full flex items-center justify-center text-2xl font-bold text-white flex-shrink-0">\${escHTML(init)}</div>
           <div>
-            <h3 class="text-xl font-bold cyan-text">\${p.full_name}</h3>
-            <p class="text-gray-500 text-sm">ID: \${p.patient_uuid||'N/A'}</p>
+            <h3 class="text-xl font-bold cyan-text">\${pfn}</h3>
+            <p class="text-gray-500 text-sm">ID: \${escHTML(p.patient_uuid||'N/A')}</p>
             <span class="status-badge status-active">Active Patient</span>
           </div>
         </div>
         <div class="grid grid-cols-2 gap-3 mb-4">
-          \${[['Age',p.age||'N/A'],['Gender',p.gender||'N/A'],['Blood Group',p.blood_type||p.blood_group||'N/A'],['Contact',p.phone||'N/A'],['Email',p.email||'N/A'],['Address',p.address||'N/A']].map(([k,v])=>'<div class="cyan-light p-3 rounded-xl"><p class="text-xs cyan-text opacity-70">'+k+'</p><p class="font-medium cyan-text text-sm mt-0.5">'+v+'</p></div>').join('')}
+          \${[['Age',p.age||'N/A'],['Gender',p.gender||'N/A'],['Blood Group',p.blood_type||p.blood_group||'N/A'],['Contact',p.phone||'N/A'],['Email',p.email||'N/A'],['Address',p.address||'N/A']]
+            .map(([k,v])=>'<div class="cyan-light p-3 rounded-xl"><p class="text-xs cyan-text opacity-70">'+escHTML(k)+'</p><p class="font-medium cyan-text text-sm mt-0.5">'+escHTML(v)+'</p></div>').join('')}
         </div>
-        \${p.medical_conditions?.length?'<div class="p-3 bg-yellow-50 rounded-xl mb-3 border-l-4 border-yellow-400"><p class="text-xs font-semibold text-yellow-700 mb-1">Medical Conditions</p><p class="text-sm text-gray-700">'+p.medical_conditions.join(', ')+'</p></div>':''}
-        \${p.allergies?.length?'<div class="p-3 bg-red-50 rounded-xl mb-3 border-l-4 border-red-400"><p class="text-xs font-semibold text-red-700 mb-1">Allergies</p><p class="text-sm text-gray-700">'+p.allergies.join(', ')+'</p></div>':''}
+        \${p.medical_conditions?.length?'<div class="p-3 bg-yellow-50 rounded-xl mb-3 border-l-4 border-yellow-400"><p class="text-xs font-semibold text-yellow-700 mb-1">Medical Conditions</p><p class="text-sm text-gray-700">'+escHTML(p.medical_conditions.join(', '))+'</p></div>':''}
+        \${p.allergies?.length?'<div class="p-3 bg-red-50 rounded-xl mb-3 border-l-4 border-red-400"><p class="text-xs font-semibold text-red-700 mb-1">Allergies</p><p class="text-sm text-gray-700">'+escHTML(p.allergies.join(', '))+'</p></div>':''}
         <div class="flex gap-3 mt-4">
-          <button onclick="window.openChat('\${p.patient_id}','\${p.full_name}')" class="flex-1 px-4 py-2 btn-white rounded-lg text-sm"><i class="fas fa-comment mr-1"></i>Message</button>
-          <button onclick="window.openPrescription('\${p.patient_id}','\${p.full_name}')" class="flex-1 px-4 py-2 btn-cyan rounded-lg text-sm"><i class="fas fa-prescription mr-1"></i>Prescribe</button>
+          <button id="profileChatBtn" class="flex-1 px-4 py-2 btn-white rounded-lg text-sm"><i class="fas fa-comment mr-1"></i>Message</button>
+          <button id="profilePrescribeBtn" class="flex-1 px-4 py-2 btn-cyan rounded-lg text-sm"><i class="fas fa-prescription mr-1"></i>Prescribe</button>
         </div>\`;
-    } catch(err) { document.getElementById('patientProfileContent').innerHTML = '<p class="text-red-500 text-center py-8">'+err.message+'</p>'; }
+      document.getElementById('profileChatBtn')?.addEventListener('click', () => window.openChat(p.patient_id, p.full_name));
+      document.getElementById('profilePrescribeBtn')?.addEventListener('click', () => window.openPrescription(p.patient_id, p.full_name));
+    } catch(err) {
+      console.error('openPatientProfile error:', err);
+      document.getElementById('patientProfileContent').innerHTML = '<p class="text-red-500 text-center py-8">' + escHTML(err.message) + '</p>';
+    }
   };
-  document.querySelectorAll('.view-patient-btn').forEach(b => b.addEventListener('click', function(){ window.openPatientProfile(this.dataset.patientId); }));
+  document.querySelectorAll('.view-patient-btn').forEach(b => b.addEventListener('click', function(){
+    window.openPatientProfile(this.dataset.patientId);
+  }));
 
-  // ─── Chat ─────────────────────────────────────────
+  // ─── Chat ──────────────────────────────────────────
   window.openChat = function(patientId, patientName) {
-    document.getElementById('chatPatientId').value          = patientId;
+    document.getElementById('chatPatientId').value                = patientId;
     document.getElementById('chatPatientNameDisplay').textContent = patientName;
-    document.getElementById('chatAvatar').textContent       = patientName ? patientName[0].toUpperCase() : 'P';
-    document.getElementById('chatMessages').innerHTML       = '';
+    document.getElementById('chatAvatar').textContent             = patientName ? patientName[0].toUpperCase() : 'P';
+    document.getElementById('chatMessages').innerHTML             = '';
     openModal('chatModal');
     loadChatHistory(patientId);
   };
@@ -1201,35 +1413,83 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) return;
       const msgs = await res.json();
       const el = document.getElementById('chatMessages');
-      el.innerHTML = msgs.map(m => \`<div class="\${m.sender==='doctor'?'chat-msg-dr':'chat-msg-pt'}"><span>\${m.message}</span></div>\`).join('');
+      el.innerHTML = msgs.map(m => \`<div class="\${m.sender==='doctor'?'chat-msg-dr':'chat-msg-pt'}"><span>\${escHTML(m.message)}</span></div>\`).join('');
       el.scrollTop = el.scrollHeight;
-    } catch {}
+    } catch(e) { console.error('loadChatHistory error:', e); }
   }
-  document.querySelectorAll('.message-patient-btn').forEach(b => b.addEventListener('click', function(){ window.openChat(this.dataset.patientId, this.dataset.patientName); }));
+  document.querySelectorAll('.message-patient-btn').forEach(b => b.addEventListener('click', function(){
+    window.openChat(this.dataset.patientId, this.dataset.patientName);
+  }));
   document.getElementById('chatForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const patientId = document.getElementById('chatPatientId').value;
     const message   = document.getElementById('chatInput').value.trim();
     if (!message) return;
     const el = document.getElementById('chatMessages');
-    el.innerHTML += \`<div class="chat-msg-dr"><span>\${message}</span></div>\`;
+    const div = document.createElement('div');
+    div.className = 'chat-msg-dr';
+    const span = document.createElement('span');
+    span.textContent = message; // textContent is safe
+    div.appendChild(span);
+    el.appendChild(div);
     el.scrollTop = el.scrollHeight;
     document.getElementById('chatInput').value = '';
-    try { await fetch(\`/api/doctor/chat/\${patientId}\`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message }) }); }
-    catch { showToast('Warning', 'Message may not have been delivered', 'warning'); }
+    try {
+      await fetch(\`/api/doctor/chat/\${patientId}\`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message })
+      });
+    } catch {
+      showToast('Warning', 'Message may not have been delivered', 'warning');
+    }
   });
 
   // ─── Online Consult ───────────────────────────────
   document.querySelectorAll('.online-consult-btn').forEach(b => {
     b.addEventListener('click', function () {
       document.getElementById('onlineConsultPatientName').textContent = this.dataset.patientName;
-      document.getElementById('startVideoCallBtn').dataset.patientId   = this.dataset.patientId;
+      document.getElementById('startVideoCallBtn').dataset.patientId    = this.dataset.patientId;
       document.getElementById('scheduleVideoCallBtn').dataset.patientId = this.dataset.patientId;
       openModal('onlineConsultModal');
     });
   });
-  document.getElementById('startVideoCallBtn')?.addEventListener('click', function () { showToast('Video Call', 'Initiating call…', 'info'); closeModal('onlineConsultModal'); });
-  document.getElementById('scheduleVideoCallBtn')?.addEventListener('click', function () { showToast('Scheduled', 'Call link sent to patient', 'success'); closeModal('onlineConsultModal'); });
+
+  document.getElementById('startVideoCallBtn')?.addEventListener('click', function () {
+    const patientId   = this.dataset.patientId;
+    const patientName = document.getElementById('onlineConsultPatientName').textContent;
+    const roomName    = 'bondhealth-' + (SERVER.doctorId || 'dr') + '-' + patientId + '-' + Date.now();
+    const jitsiUrl    = 'https://meet.jit.si/' + roomName;
+    window.open(jitsiUrl, '_blank', 'noopener,noreferrer');
+    fetch('/api/doctor/video/initiate', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ patient_id: patientId, room_url: jitsiUrl, patient_name: patientName })
+    }).catch(e => console.error('video initiate error:', e));
+    showToast('Video Call', 'Call room opened. Patient will be notified.', 'success');
+    closeModal('onlineConsultModal');
+  });
+
+  document.getElementById('scheduleVideoCallBtn')?.addEventListener('click', function () {
+    document.getElementById('scheduleTimeRow').classList.remove('hidden');
+    document.getElementById('confirmScheduleBtn').classList.remove('hidden');
+    this.classList.add('hidden');
+    const dt = new Date(); dt.setDate(dt.getDate() + 1); dt.setHours(10, 0, 0, 0);
+    document.getElementById('scheduleDateTime').value          = dt.toISOString().slice(0,16);
+    document.getElementById('confirmScheduleBtn').dataset.patientId = this.dataset.patientId;
+  });
+
+  document.getElementById('confirmScheduleBtn')?.addEventListener('click', function () {
+    const patientId    = this.dataset.patientId;
+    const scheduleTime = document.getElementById('scheduleDateTime').value;
+    if (!scheduleTime) { showToast('Error', 'Please pick a date and time', 'error'); return; }
+    fetch('/api/doctor/video/schedule', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ patient_id: patientId, scheduled_time: scheduleTime })
+    }).catch(e => console.error('video schedule error:', e));
+    showToast('Scheduled', 'Video call scheduled. Patient will be notified.', 'success');
+    document.getElementById('scheduleTimeRow').classList.add('hidden');
+    document.getElementById('confirmScheduleBtn').classList.add('hidden');
+    document.getElementById('scheduleVideoCallBtn').classList.remove('hidden');
+    closeModal('onlineConsultModal');
+  });
 
   // ─── Prescriptions ────────────────────────────────
   window.openPrescription = function(patientId, patientName) {
@@ -1247,7 +1507,9 @@ document.addEventListener('DOMContentLoaded', () => {
     attachMedEvents();
     openModal('prescriptionModal');
   };
-  document.querySelectorAll('.prescribe-btn').forEach(b => b.addEventListener('click', function(){ window.openPrescription(this.dataset.patientId, this.dataset.patientName); }));
+  document.querySelectorAll('.prescribe-btn').forEach(b => b.addEventListener('click', function(){
+    window.openPrescription(this.dataset.patientId, this.dataset.patientName);
+  }));
 
   function attachMedEvents() {
     document.querySelectorAll('.remove-medication').forEach(b => {
@@ -1269,30 +1531,51 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('prescriptionForm')?.addEventListener('submit', async e => {
     e.preventDefault();
+    const diagnosis = document.getElementById('prescriptionDiagnosis').value.trim();
+    if (!diagnosis) { showToast('Error', 'Diagnosis is required', 'error'); return; }
     const medications = [];
     document.querySelectorAll('.medication-row').forEach(row => {
       const name = row.querySelector('.medication-name').value.trim();
-      if (name) medications.push({ name, dosage: row.querySelector('.medication-dosage').value, frequency: row.querySelector('.medication-frequency').value });
+      if (name) medications.push({ name, dosage: row.querySelector('.medication-dosage').value.trim(), frequency: row.querySelector('.medication-frequency').value.trim() });
     });
     if (!medications.length) { showToast('Error', 'Add at least one medication', 'error'); return; }
     try {
       const res = await fetch('/api/doctor/prescription/create', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ patient_id: document.getElementById('prescriptionPatientId').value, diagnosis: document.getElementById('prescriptionDiagnosis').value, medications, notes: document.getElementById('prescriptionNotes').value })
+        body: JSON.stringify({
+          patient_id: document.getElementById('prescriptionPatientId').value,
+          diagnosis, medications,
+          notes: document.getElementById('prescriptionNotes').value.trim()
+        })
       });
       if (res.ok) { showToast('Saved', 'Prescription saved!', 'success'); closeModal('prescriptionModal'); }
       else { const err = await res.json().catch(()=>({})); showToast('Error', err.message||'Failed', 'error'); }
-    } catch(err) { showToast('Error', err.message, 'error'); }
+    } catch(err) {
+      console.error('prescription error:', err);
+      showToast('Error', err.message, 'error');
+    }
   });
 
   // ─── Add Patient ──────────────────────────────────
   document.getElementById('addPatientBtn')?.addEventListener('click', () => openModal('addPatientModal'));
   document.getElementById('addPatientForm')?.addEventListener('submit', async e => {
     e.preventDefault();
+    const email = document.getElementById('newPatientEmail').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Error', 'Valid email is required', 'error'); return; }
     try {
       const res = await fetch('/api/doctor/patient/add', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ full_name: document.getElementById('newPatientName').value, email: document.getElementById('newPatientEmail').value, phone: document.getElementById('newPatientPhone').value, dob: document.getElementById('newPatientDob').value, gender: document.getElementById('newPatientGender').value, blood_group: document.getElementById('newPatientBloodGroup').value, address: document.getElementById('newPatientAddress').value, emergency_name: document.getElementById('newPatientEmergencyName').value, emergency_phone: document.getElementById('newPatientEmergencyPhone').value })
+        body: JSON.stringify({
+          full_name:       document.getElementById('newPatientName').value.trim(),
+          email,
+          phone:           document.getElementById('newPatientPhone').value.trim(),
+          dob:             document.getElementById('newPatientDob').value,
+          gender:          document.getElementById('newPatientGender').value,
+          blood_group:     document.getElementById('newPatientBloodGroup').value,
+          address:         document.getElementById('newPatientAddress').value.trim(),
+          emergency_name:  document.getElementById('newPatientEmergencyName').value.trim(),
+          emergency_phone: document.getElementById('newPatientEmergencyPhone').value.trim()
+        })
       });
       if (res.ok) {
         showToast('Added', 'Patient added!', 'success'); closeModal('addPatientModal'); e.target.reset();
@@ -1300,7 +1583,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('sidebarPatientCount').textContent = cur + 1;
         document.getElementById('statPatients').textContent = cur + 1;
       } else { const err = await res.json().catch(()=>({})); showToast('Error', err.message||'Failed', 'error'); }
-    } catch(err) { showToast('Error', err.message, 'error'); }
+    } catch(err) {
+      console.error('add patient error:', err);
+      showToast('Error', err.message, 'error');
+    }
   });
 
   // ─── Delete Report ────────────────────────────────
@@ -1334,7 +1620,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const err = await res.json().catch(()=>({}));
         showToast('Error', err.message || 'Delete failed', 'error');
       }
-    } catch(err) { showToast('Error', err.message, 'error'); }
+    } catch(err) {
+      console.error('delete report error:', err);
+      showToast('Error', err.message, 'error');
+    }
   });
 
   // ─── Apply Leave ──────────────────────────────────
@@ -1358,6 +1647,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const reason = document.getElementById('leaveReason').value.trim();
     const type   = document.getElementById('leaveType').value;
     if (to < from) { showToast('Error', 'End date cannot be before start date', 'error'); return; }
+    if (!reason)   { showToast('Error', 'Please provide a reason', 'error'); return; }
     try {
       const res = await fetch('/api/doctor/leave/apply', {
         method: 'POST', headers: {'Content-Type':'application/json'},
@@ -1365,14 +1655,16 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       if (res.ok) {
         showToast('Submitted', 'Leave request sent to admin for approval', 'success');
-        closeModal('applyLeaveModal');
-        e.target.reset();
+        closeModal('applyLeaveModal'); e.target.reset();
         await loadLeaveHistory();
       } else {
         const err = await res.json().catch(()=>({}));
         showToast('Error', err.message || 'Failed to submit', 'error');
       }
-    } catch(err) { showToast('Error', err.message, 'error'); }
+    } catch(err) {
+      console.error('apply leave error:', err);
+      showToast('Error', err.message, 'error');
+    }
   });
 
   async function loadLeaveHistory() {
@@ -1387,25 +1679,28 @@ document.addEventListener('DOMContentLoaded', () => {
         el.innerHTML = '<div class="text-center py-16 text-gray-400"><i class="fas fa-calendar-check text-5xl mb-4 block"></i><p class="text-lg">No leave records found</p><p class="text-sm mt-1">Use "Apply for Leave" to submit a request</p></div>';
         return;
       }
-      const statusColor = { Approved:'text-green-600 bg-green-50 border-green-200', Pending:'text-amber-600 bg-amber-50 border-amber-200', Rejected:'text-red-600 bg-red-50 border-red-200' };
+      const statusColor = {
+        Approved: 'text-green-600 bg-green-50 border-green-200',
+        Pending:  'text-amber-600 bg-amber-50 border-amber-200',
+        Rejected: 'text-red-600 bg-red-50 border-red-200'
+      };
       el.innerHTML = list.map(l => {
         const sc = statusColor[l.status] || statusColor.Pending;
         return \`<div class="white-card rounded-xl p-5 border border-gray-100">
           <div class="flex items-start justify-between gap-4">
             <div>
               <div class="flex items-center gap-3 mb-1">
-                <span class="font-semibold cyan-text">\${new Date(l.from_date).toLocaleDateString()} → \${new Date(l.to_date).toLocaleDateString()}</span>
-                <span class="text-xs px-3 py-1 rounded-full border font-semibold \${sc}">\${l.status}</span>
+                <span class="font-semibold cyan-text">\${escHTML(new Date(l.from_date).toLocaleDateString())} → \${escHTML(new Date(l.to_date).toLocaleDateString())}</span>
+                <span class="text-xs px-3 py-1 rounded-full border font-semibold \${sc}">\${escHTML(l.status)}</span>
               </div>
-              <p class="text-sm text-gray-500 capitalize"><i class="fas fa-tag mr-1"></i>\${l.type || 'Leave'}</p>
-              <p class="text-sm text-gray-700 mt-2">\${l.reason}</p>
-              \${l.admin_note ? \`<p class="text-xs text-gray-400 mt-1"><i class="fas fa-comment mr-1"></i>Admin: \${l.admin_note}</p>\` : ''}
+              <p class="text-sm text-gray-500 capitalize"><i class="fas fa-tag mr-1"></i>\${escHTML(l.type || 'Leave')}</p>
+              <p class="text-sm text-gray-700 mt-2">\${escHTML(l.reason)}</p>
+              \${l.admin_note ? \`<p class="text-xs text-gray-400 mt-1"><i class="fas fa-comment mr-1"></i>Admin: \${escHTML(l.admin_note)}</p>\` : ''}
             </div>
-            \${l.status === 'Pending' ? \`<button class="cancel-leave-btn text-xs btn-red px-3 py-1 rounded-lg flex-shrink-0" data-id="\${l.leave_id}"><i class="fas fa-times mr-1"></i>Cancel</button>\` : ''}
+            \${l.status === 'Pending' ? \`<button class="cancel-leave-btn text-xs btn-red px-3 py-1 rounded-lg flex-shrink-0" data-id="\${escHTML(l.leave_id)}"><i class="fas fa-times mr-1"></i>Cancel</button>\` : ''}
           </div>
         </div>\`;
       }).join('');
-      // Cancel leave
       document.querySelectorAll('.cancel-leave-btn').forEach(b => b.addEventListener('click', async function() {
         if (!confirm('Cancel this leave request?')) return;
         const r = await fetch(\`/api/doctor/leave/\${this.dataset.id}\`, { method: 'DELETE' });
@@ -1413,11 +1708,12 @@ document.addEventListener('DOMContentLoaded', () => {
         else showToast('Error', 'Could not cancel leave', 'error');
       }));
     } catch(err) {
-      el.innerHTML = \`<div class="text-center py-10 text-red-400"><i class="fas fa-exclamation-circle text-3xl mb-3 block"></i><p>\${err.message}</p></div>\`;
+      console.error('loadLeaveHistory error:', err);
+      el.innerHTML = \`<div class="text-center py-10 text-red-400"><i class="fas fa-exclamation-circle text-3xl mb-3 block"></i><p>\${escHTML(err.message)}</p></div>\`;
     }
   }
 
-  // ─── Profile photo preview & upload ──────────────
+  // ─── Profile photo preview ────────────────────────
   document.getElementById('editPhotoFile')?.addEventListener('change', function() {
     const file = this.files[0];
     if (!file) return;
@@ -1425,52 +1721,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const reader = new FileReader();
     reader.onload = e => {
       const wrap = document.getElementById('photoPreviewWrap');
-      wrap.innerHTML = \`<img src="\${e.target.result}" class="w-full h-full object-cover rounded-full">\`;
+      const img = document.createElement('img');
+      img.src = e.target.result;
+      img.className = 'w-full h-full object-cover rounded-full';
+      wrap.innerHTML = '';
+      wrap.appendChild(img);
     };
     reader.readAsDataURL(file);
-  });
-
-  // ─── Video Call (Jitsi) ───────────────────────────
-  document.getElementById('startVideoCallBtn')?.addEventListener('click', function () {
-    const patientId   = this.dataset.patientId;
-    const patientName = document.getElementById('onlineConsultPatientName').textContent;
-    const roomName    = 'bondhealth-' + (SERVER.doctorId || 'dr') + '-' + patientId + '-' + Date.now();
-    const jitsiUrl    = 'https://meet.jit.si/' + roomName;
-    // Open the call in a new tab for the doctor
-    window.open(jitsiUrl, '_blank');
-    // Notify patient via API (best-effort)
-    fetch('/api/doctor/video/initiate', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ patient_id: patientId, room_url: jitsiUrl, patient_name: patientName })
-    }).catch(() => {});
-    showToast('Video Call', 'Call room opened. Patient will be notified.', 'success');
-    closeModal('onlineConsultModal');
-  });
-  document.getElementById('scheduleVideoCallBtn')?.addEventListener('click', function () {
-    // Show the date/time picker instead of closing
-    document.getElementById('scheduleTimeRow').classList.remove('hidden');
-    document.getElementById('confirmScheduleBtn').classList.remove('hidden');
-    document.getElementById('scheduleVideoCallBtn').classList.add('hidden');
-    // Pre-fill with tomorrow at 10am
-    const dt = new Date(); dt.setDate(dt.getDate() + 1); dt.setHours(10, 0, 0, 0);
-    document.getElementById('scheduleDateTime').value = dt.toISOString().slice(0,16);
-    document.getElementById('confirmScheduleBtn').dataset.patientId = this.dataset.patientId;
-  });
-
-  document.getElementById('confirmScheduleBtn')?.addEventListener('click', function () {
-    const patientId    = this.dataset.patientId;
-    const scheduleTime = document.getElementById('scheduleDateTime').value;
-    if (!scheduleTime) { showToast('Error', 'Please pick a date and time', 'error'); return; }
-    fetch('/api/doctor/video/schedule', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ patient_id: patientId, scheduled_time: scheduleTime })
-    }).catch(() => {});
-    showToast('Scheduled', 'Video call scheduled. Patient will be notified.', 'success');
-    // Reset modal state
-    document.getElementById('scheduleTimeRow').classList.add('hidden');
-    document.getElementById('confirmScheduleBtn').classList.add('hidden');
-    document.getElementById('scheduleVideoCallBtn').classList.remove('hidden');
-    closeModal('onlineConsultModal');
   });
 
   // ─── Delete profile photo ─────────────────────────
@@ -1480,25 +1737,30 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/doctor/profile/photo', { method: 'DELETE' });
       if (res.ok) {
         const wrap = document.getElementById('photoPreviewWrap');
-        const initials = document.getElementById('headerDoctorName')?.textContent?.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2) || 'DR';
-        wrap.innerHTML = '<span>' + initials + '</span>';
+        const nameEl = document.getElementById('headerDoctorName');
+        const initials = nameEl?.textContent?.split(' ').filter(Boolean).map(n=>n[0]??'').join('').toUpperCase().slice(0,2) || 'DR';
+        wrap.textContent = initials;
         const profileBtn = document.getElementById('profileBtn');
-        if (profileBtn) profileBtn.innerHTML = '<span class="text-white font-bold text-sm">' + initials + '</span>';
+        if (profileBtn) { profileBtn.innerHTML = ''; profileBtn.textContent = initials; }
         showToast('Removed', 'Profile photo removed', 'success');
       } else { showToast('Error', 'Failed to remove photo', 'error'); }
-    } catch(err) { showToast('Error', err.message, 'error'); }
+    } catch(err) {
+      console.error('delete photo error:', err);
+      showToast('Error', err.message, 'error');
+    }
   });
 
   // ─── Patient search ───────────────────────────────
   document.getElementById('patientSearch')?.addEventListener('input', function () {
     const term = this.value.toLowerCase();
     document.querySelectorAll('.patient-card').forEach(c => {
-      c.style.display = (c.querySelector('.patient-name')?.textContent.toLowerCase()||'').includes(term) ? '' : 'none';
+      c.style.display = (c.querySelector('.patient-name')?.textContent.toLowerCase() || '').includes(term) ? '' : 'none';
     });
   });
 
   // ─── Auto-refresh stats every 60s ────────────────
-  setInterval(async () => {
+  // Store interval ID so it can be cleared if needed
+  const statsInterval = setInterval(async () => {
     try {
       const res = await fetch('/api/doctor/stats');
       if (!res.ok) return;
@@ -1506,11 +1768,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (s.appointments != null) { document.getElementById('statAppointments').textContent = s.appointments; document.getElementById('sidebarApptCount').textContent = s.appointments; }
       if (s.pending_reports != null) { document.getElementById('statReports').textContent = s.pending_reports; document.getElementById('sidebarReportCount').textContent = s.reports ?? s.pending_reports; }
       if (s.patients != null) { document.getElementById('statPatients').textContent = s.patients; document.getElementById('sidebarPatientCount').textContent = s.patients; }
-    } catch {}
+    } catch(e) { console.error('stats refresh error:', e); }
   }, 60000);
 
-  // ─── Welcome ──────────────────────────────────────
-  setTimeout(() => showToast('Welcome', 'Good day, ${doctorData.name}!', 'success'), 800);
+  // Clear interval on page unload to prevent leaks
+  window.addEventListener('beforeunload', () => clearInterval(statsInterval));
+
+  // ─── Welcome toast ────────────────────────────────
+  setTimeout(() => showToast('Welcome', 'Good day, ${esc(doctorData.name)}!', 'success'), 800);
 
 });
 </script>
@@ -1556,24 +1821,28 @@ module.exports = async function renderDoctorDashboard(userId) {
          ORDER BY a.appointment_time ASC`,
         [doctorId]
       ),
-      // All lab reports for this doctor
+      // Lab reports with pagination constant
       query(
         `SELECT r.*, p.full_name AS patient_name, p.patient_uuid, p.patient_id
          FROM lab_reports r
          JOIN patients p ON r.patient_id = p.patient_id
          WHERE r.doctor_id = $1
          ORDER BY r.created_at DESC
-         LIMIT 50`,
-        [doctorId]
+         LIMIT $2`,
+        [doctorId, 50] // matches client-side REPORTS_PAGE_SIZE
       ),
-      // Distinct patients for this doctor (most recent visit first)
+      // Patients — uses subquery with MAX() to safely get most recent visit
       query(
-        `SELECT DISTINCT ON (p.patient_id) p.*,
-           a.appointment_date AS last_visit
+        `SELECT p.*,
+           sub.last_visit
          FROM patients p
-         JOIN appointments a ON p.patient_id = a.patient_id
-         WHERE a.doctor_id = $1
-         ORDER BY p.patient_id, a.appointment_date DESC`,
+         JOIN (
+           SELECT patient_id, MAX(appointment_date) AS last_visit
+           FROM appointments
+           WHERE doctor_id = $1
+           GROUP BY patient_id
+         ) sub ON p.patient_id = sub.patient_id
+         ORDER BY sub.last_visit DESC`,
         [doctorId]
       )
     ]);
