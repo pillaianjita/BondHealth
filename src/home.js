@@ -54,6 +54,29 @@ const verifyToken = (token) => {
         return null;
     }
 };
+// ============================================
+// DATABASE HELPER FUNCTIONS
+// ============================================
+async function checkPatientInHospital(patientId, hospitalId) {
+    try {
+        const result = await query(
+            `SELECT EXISTS(
+                SELECT 1 FROM appointments a
+                JOIN doctors d ON a.doctor_id = d.doctor_id
+                WHERE a.patient_id = $1 AND d.hospital_id = $2
+                UNION
+                SELECT 1 FROM lab_reports lr
+                JOIN lab_technicians lt ON lr.lab_tech_id = lt.lab_tech_id
+                WHERE lr.patient_id = $1 AND lt.hospital_id = $2
+            ) as exists`,
+            [patientId, hospitalId]
+        );
+        return result.rows[0].exists;
+    } catch (error) {
+        console.error('Error checking patient in hospital:', error);
+        return false;
+    }
+}
 
 // ============================================
 // AUTH MIDDLEWARE
@@ -1204,23 +1227,112 @@ app.post('/api/lab/upload-report', authenticate, authorize('lab'), upload.single
             if (doctorResult.rows.length > 0) actualDoctorId = doctorResult.rows[0].doctor_id;
         }
 
+        const labTechHospitalResult = await client.query(
+            'SELECT hospital_id FROM lab_technicians WHERE user_id = $1',
+            [req.user.id]
+        );
+        const labTechHospitalId = labTechHospitalResult.rows[0]?.hospital_id;
+
+        // Check if patient belongs to this hospital
+        const patientInHospital = await checkPatientInHospital(actualPatientId, labTechHospitalId);
+
+        // Enforce rules
+        if (patientInHospital) {
+            if (!doctorId || !doctorId.trim()) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Doctor ID is required for patients from this hospital' 
+                });
+            }
+            if (sendTo === 'patient') {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Cannot send only to patient for patients from this hospital' 
+                });
+            }
+        }
         const fileData = await storageService.uploadFile(req.file, 'reports');
         const reportUUID = 'REP-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
         const today = new Date().toISOString().split('T')[0];
 
+        // Insert the report with the correct shared_with value
         const result = await client.query(
-            `INSERT INTO lab_reports (report_uuid, patient_id, doctor_id, lab_tech_id, test_type, test_date, findings, file_url, status, priority, shared_with)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING report_id, report_uuid`,
-            [reportUUID, actualPatientId, actualDoctorId, labTechId, testType, today, findings || 'No findings', fileData.url, 'completed', priority || 'normal', sendTo]
+            `INSERT INTO lab_reports (
+                report_uuid, patient_id, doctor_id, lab_tech_id, 
+                test_type, test_date, findings, file_url, status, 
+                priority, shared_with
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
+             RETURNING report_id, report_uuid, shared_with`,
+            [
+                reportUUID, 
+                actualPatientId, 
+                actualDoctorId, 
+                labTechId, 
+                testType, 
+                today, 
+                findings || 'No findings', 
+                fileData.url, 
+                'completed', 
+                priority || 'normal', 
+                sendTo || 'doctor'  // Use the value from the form, default to 'doctor'
+            ]
         );
         await client.query('COMMIT');
-        res.json({ success: true, message: 'Report uploaded successfully', reportId: result.rows[0].report_uuid, sharedWith: sendTo });
+        
+        res.json({ 
+            success: true, 
+            message: 'Report uploaded successfully', 
+            reportId: result.rows[0].report_uuid, 
+            sharedWith: result.rows[0].shared_with 
+        });
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error uploading report:', error);
         res.status(500).json({ success: false, message: error.message });
     } finally {
         client.release();
+    }
+});
+
+// Check if patient belongs to lab tech's hospital
+app.get('/api/lab/check-patient-hospital', authenticate, authorize('lab'), async (req, res) => {
+    try {
+        const { patientId, hospitalId } = req.query;
+        
+        if (!patientId || !hospitalId) {
+            return res.status(400).json({ error: 'Patient ID and Hospital ID required' });
+        }
+        
+        // First get the actual patient_id from patient_uuid
+        const patientResult = await query(
+            'SELECT patient_id FROM patients WHERE patient_uuid = $1',
+            [patientId]
+        );
+        
+        if (patientResult.rows.length === 0) {
+            return res.json({ isInHospital: false });
+        }
+        
+        const actualPatientId = patientResult.rows[0].patient_id;
+        
+        // Check if patient has any appointments or lab reports in this hospital
+        const result = await query(
+            `SELECT EXISTS(
+                SELECT 1 FROM appointments a
+                JOIN doctors d ON a.doctor_id = d.doctor_id
+                WHERE a.patient_id = $1 AND d.hospital_id = $2
+                UNION
+                SELECT 1 FROM lab_reports lr
+                JOIN lab_technicians lt ON lr.lab_tech_id = lt.lab_tech_id
+                WHERE lr.patient_id = $1 AND lt.hospital_id = $2
+            ) as in_hospital`,
+            [actualPatientId, hospitalId]
+        );
+        
+        res.json({ isInHospital: result.rows[0].in_hospital });
+    } catch (error) {
+        console.error('Error checking patient hospital:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
@@ -1505,7 +1617,9 @@ app.get('/api/reports', authenticate, async (req, res) => {
             result = await query(
                 `SELECT r.* FROM lab_reports r
                  JOIN patients p ON r.patient_id = p.patient_id
-                 WHERE p.user_id = $1 ORDER BY r.created_at DESC`,
+                 WHERE p.user_id = $1
+                 AND r.shared_with IN ('patient', 'both')
+                 ORDER BY r.created_at DESC`,
                 [req.user.id]
             );
         } else {
@@ -1655,6 +1769,7 @@ app.get('/api/doctor/reports', authenticate, authorize('doctor'), async (req, re
              JOIN patients p ON r.patient_id = p.patient_id
              JOIN doctors d ON r.doctor_id = d.doctor_id
              WHERE d.user_id = $1
+             AND r.shared_with IN ('doctor', 'both')
              ORDER BY r.created_at DESC LIMIT 50`,
             [req.user.id]
         );
@@ -1671,7 +1786,9 @@ app.get('/api/lab-reports', authenticate, authorize('doctor'), async (req, res) 
             `SELECT r.*, p.full_name as patient_name FROM lab_reports r
              JOIN patients p ON r.patient_id = p.patient_id
              JOIN doctors d ON r.doctor_id = d.doctor_id
-             WHERE d.user_id = $1 AND r.status = 'pending' ORDER BY r.created_at DESC`,
+             WHERE d.user_id = $1 AND r.status = 'pending'
+             AND r.shared_with IN ('doctor', 'both')
+             ORDER BY r.created_at DESC`,
             [req.user.id]
         );
         res.json(result.rows);
@@ -2860,6 +2977,7 @@ function generateHTML() {
       });
     }
 
+    
     // ── Review System ───────────────────────────────────────────────────
     let currentFilter = 'all', currentSort = 'recent', currentSearch = '', currentPage = 1;
 

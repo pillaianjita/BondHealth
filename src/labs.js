@@ -20,6 +20,28 @@ async function getLabTechnicianData(userId) {
     }
 }
 
+async function checkPatientInHospital(patientId, hospitalId) {
+    try {
+        // Check if the patient has any appointments or records in this hospital
+        const result = await query(
+            `SELECT EXISTS(
+                SELECT 1 FROM appointments a
+                JOIN doctors d ON a.doctor_id = d.doctor_id
+                WHERE a.patient_id = $1 AND d.hospital_id = $2
+                UNION
+                SELECT 1 FROM lab_reports lr
+                JOIN lab_technicians lt ON lr.lab_tech_id = lt.lab_tech_id
+                WHERE lr.patient_id = $1 AND lt.hospital_id = $2
+            ) as exists`,
+            [patientId, hospitalId]
+        );
+        return result.rows[0].exists;
+    } catch (error) {
+        console.error('Error checking patient in hospital:', error);
+        return false;
+    }
+}
+
 async function getDashboardStats(labTechId, hospitalId) {
     try {
         const todayTests = await query(
@@ -184,38 +206,42 @@ async function saveLabReportWithFile(reportData, labTechId, fileUrl) {
             throw new Error('Patient not found');
         }
         
-        // Get doctor_id from doctor_id
-        const doctorResult = await client.query(
-            'SELECT doctor_id FROM doctors WHERE doctor_uuid = $1 OR doctor_id::text = $1',
-            [reportData.docId]
-        );
+        // Get doctor_id from doctor_id (if provided)
+        let doctorId = null;
+        if (reportData.docId && reportData.docId.trim()) {
+            const doctorResult = await client.query(
+                'SELECT doctor_id FROM doctors WHERE doctor_uuid = $1 OR doctor_id::text = $1',
+                [reportData.docId]
+            );
+            doctorId = doctorResult.rows[0]?.doctor_id || null;
+        }
         
         const reportUUID = 'REP-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
         
-        // Insert lab report with file_url - FIXED: 9 values for 9 placeholders
+        // Insert lab report with file_url - FIXED: using reportData.sendTo for shared_with
         const result = await client.query(
             `INSERT INTO lab_reports (
                 report_uuid, patient_id, doctor_id, lab_tech_id,
                 test_type, test_date, findings, file_url, status,
                 priority, shared_with
             ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, $7, $8, $9, $10)
-            RETURNING report_id, report_uuid`,
+            RETURNING report_id, report_uuid, shared_with`,
             [
                 reportUUID,
                 patientResult.rows[0].patient_id,
-                doctorResult.rows[0]?.doctor_id || null,
+                doctorId,
                 labTechId,
                 reportData.testType,
-                reportData.testResults || 'No findings',
+                reportData.testResults || reportData.findings || 'No findings', // Handle both possible field names
                 fileUrl,
                 'completed',  // status
                 reportData.priority || 'normal',
-                reportData.sendTo
+                reportData.sendTo || 'doctor'  // This is the key fix - use sendTo from the form
             ]
         );
         
         await client.query('COMMIT');
-        return result.rows[0].report_uuid;
+        return result.rows[0];
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error saving lab report with file:', error);
@@ -847,7 +873,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                     
                     <div class="form-group">
                         <label class="form-label">Doctor ID</label>
-                        <input type="text" class="form-input" id="docId" placeholder="Enter Doctor ID" required>
+                        <input type="text" class="form-input" id="docId" placeholder="Enter Doctor ID">
                     </div>
                     
                     <div class="form-group">
@@ -993,10 +1019,81 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             });
         });
 
-        // Form Submission
-        // Form Submission
-        // Form Submission
-        // Form Submission
+        // Add this to your existing script section
+        let currentPatientHospitalStatus = false;
+        let labTechHospitalId = null;
+        
+        // Function to check if patient belongs to lab tech's hospital
+        async function checkPatientHospital(patientId) {
+            if (!patientId || !labTechHospitalId) return;
+            
+            try {
+                console.log('Checking patient:', patientId, 'for hospital:', labTechHospitalId);
+                const response = await fetch('/api/lab/check-patient-hospital?patientId=' + encodeURIComponent(patientId) + '&hospitalId=' + encodeURIComponent(labTechHospitalId));
+                const data = await response.json();
+                
+                currentPatientHospitalStatus = data.isInHospital;
+                console.log('Patient in hospital:', currentPatientHospitalStatus);
+                
+                const docIdField = document.getElementById('docId');
+                const doctorOnlyRadio = document.querySelector('input[name="sendTo"][value="doctor"]');
+                const patientOnlyRadio = document.querySelector('input[name="sendTo"][value="patient"]');
+                const bothRadio = document.querySelector('input[name="sendTo"][value="both"]');
+                
+                if (currentPatientHospitalStatus) {
+                    // Patient is from this hospital - doctor ID required, disable patient-only option
+                    docIdField.required = true;
+                    docIdField.disabled = false;
+                    docIdField.placeholder = "Enter Doctor ID (Required)";
+                    
+                    // Disable patient-only radio and select doctor-only by default
+                    patientOnlyRadio.disabled = true;
+                    patientOnlyRadio.parentElement.style.opacity = '0.5';
+                    patientOnlyRadio.parentElement.style.cursor = 'not-allowed';
+                    
+                    // If patient-only was checked, switch to doctor-only
+                    if (patientOnlyRadio.checked) {
+                        doctorOnlyRadio.checked = true;
+                    } else if (!doctorOnlyRadio.checked && !bothRadio.checked) {
+                        doctorOnlyRadio.checked = true;
+                    }
+                    
+                    // Add tooltip
+                    patientOnlyRadio.parentElement.title = "Patient is from this hospital - report must be sent to doctor";
+                } else {
+                    // Patient is external - doctor ID optional, all options available
+                    docIdField.required = false;
+                    docIdField.disabled = false;
+                    docIdField.placeholder = "Enter Doctor ID (Optional for external patients)";
+                    
+                    // Enable all radio options
+                    patientOnlyRadio.disabled = false;
+                    patientOnlyRadio.parentElement.style.opacity = '1';
+                    patientOnlyRadio.parentElement.style.cursor = 'pointer';
+                    patientOnlyRadio.parentElement.title = "";
+                }
+            } catch (error) {
+                console.error('Error checking patient hospital:', error);
+            }
+        }
+        
+        // Add event listener for patient ID input (on blur)
+        document.getElementById('pid').addEventListener('blur', function() {
+            const patientId = this.value.trim();
+            if (patientId) {
+                checkPatientHospital(patientId);
+            }
+        });
+        
+        // Add event listener for patient suggestions
+        document.querySelectorAll('.patient-suggestion').forEach(suggestion => {
+            suggestion.addEventListener('click', function() {
+                const patientId = this.textContent;
+                document.getElementById('pid').value = patientId;
+                checkPatientHospital(patientId);
+            });
+        });
+        
         // Form Submission
         document.getElementById('submitReport').addEventListener('click', async function(e) {
             e.preventDefault();
@@ -1007,7 +1104,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             const testType = document.getElementById('testType').value;
             const priority = document.getElementById('priority').value;
             const testResults = document.getElementById('testResults').value;
-            const sendTo = document.querySelector('input[name="sendTo"]:checked').value;
+            const sendTo = document.querySelector('input[name="sendTo"]:checked')?.value;
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
             
@@ -1016,13 +1113,25 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 alert('Please fill in all required fields');
                 return;
             }
-            
+            await checkPatientHospital(pid);
             // Check if file is selected
             if (!file) {
                 alert('Please select a file to upload');
                 return;
             }
             
+            // Validate based on patient hospital status
+            if (currentPatientHospitalStatus) {
+                if (!docId) {
+                    alert('Doctor ID is required for patients from this hospital');
+                    return;
+                }
+                if (sendTo === 'patient') {
+                    alert('Cannot send only to patient for patients from this hospital. Select "Doctor Only" or "Both".');
+                    return;
+                }
+            }
+
             // Check file size (100MB limit)
             if (file.size > 100 * 1024 * 1024) {
                 alert('File size exceeds 100MB limit');
@@ -1050,21 +1159,25 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 method: 'POST',
                 headers: {
                     'X-User-Id': document.getElementById('techId').value
-                    // Don't set Content-Type - browser will set it with boundary for FormData
                 },
                 body: formData
             })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    // Show success message
+                    // Show success message with correct recipient
                     const successMessage = document.getElementById('successMessage');
                     let recipientText = '';
-                    if (sendTo === 'doctor') recipientText = 'Doctor';
-                    else if (sendTo === 'patient') recipientText = 'Patient';
+                    
+                    // Use the data.sharedWith returned from server
+                    const sharedWith = data.sharedWith || sendTo;
+                    
+                    if (sharedWith === 'doctor') recipientText = 'Doctor';
+                    else if (sharedWith === 'patient') recipientText = 'Patient';
                     else recipientText = 'Doctor & Patient';
                     
-                    successMessage.querySelector('.success-text').textContent = "Report for Patient " + pid + " sent to " + recipientText + " with file: " + file.name;
+                    successMessage.querySelector('.success-text').textContent = 
+                        "Report for Patient " + pid + " sent to " + recipientText + " with file: " + file.name;
                     successMessage.classList.add('show');
                     
                     // Reset form
@@ -1075,6 +1188,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                     document.getElementById('testResults').value = '';
                     document.getElementById('fileName').textContent = '';
                     document.getElementById('fileInput').value = '';
+                    
+                    // Reset patient hospital status
+                    currentPatientHospitalStatus = false;
                     
                     // Hide success message after 3 seconds
                     setTimeout(function() {
@@ -1111,6 +1227,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             document.getElementById('testResults').value = '';
             document.getElementById('fileName').textContent = '';
             document.getElementById('fileInput').value = '';
+            currentPatientHospitalStatus = false;
         }
 
         // Function to fetch patient history from server
@@ -1130,19 +1247,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             });
         }
 
-        // Sample patient data
-        const samplePatients = [
-            { id: 'P-1001', name: 'John Smith', testType: 'Blood Test', date: '2024-12-15', status: 'completed' },
-            { id: 'P-1002', name: 'Emma Johnson', testType: 'X-Ray', date: '2024-12-15', status: 'pending' },
-            { id: 'P-1003', name: 'Michael Brown', testType: 'MRI Scan', date: '2024-12-14', status: 'completed' },
-            { id: 'P-1004', name: 'Sarah Davis', testType: 'Urine Analysis', date: '2024-12-14', status: 'urgent' },
-            { id: 'P-1005', name: 'Robert Wilson', testType: 'ECG', date: '2024-12-13', status: 'completed' },
-            { id: 'P-1006', name: 'Lisa Miller', testType: 'Ultrasound', date: '2024-12-13', status: 'pending' },
-            { id: 'P-1007', name: 'David Taylor', testType: 'Blood Test', date: '2024-12-12', status: 'completed' },
-            { id: 'P-1008', name: 'Jennifer Lee', testType: 'X-Ray', date: '2024-12-12', status: 'completed' }
-        ];
-
-        // Populate patients table
         // Populate patients table
         function populatePatientsTable() {
             const tableBody = document.getElementById('patientsTable');
@@ -1236,16 +1340,6 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             });
         }
 
-        // Reset upload form
-        function resetUploadForm() {
-            document.getElementById('pid').value = '';
-            document.getElementById('docId').value = '';
-            document.getElementById('testType').value = '';
-            document.getElementById('priority').value = 'normal';
-            document.getElementById('testResults').value = '';
-            document.getElementById('fileName').textContent = '';
-            document.getElementById('fileInput').value = '';
-        }
         // Auto-suggest for Doctor ID
         document.getElementById('docId').addEventListener('input', function(e) {
             const value = e.target.value;
@@ -1261,7 +1355,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 window.location.href = '/';
             }
         }
-        // Initialize
+
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             // Get technician ID from the page
@@ -1269,6 +1363,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             if (techIdElement) {
                 document.getElementById('loggedInUser').textContent = 'Technician ID: ' + techIdElement.textContent;
             }
+            
+            // Get lab hospital ID from body data attribute
+            labTechHospitalId = document.body.dataset.labHospitalId;
+            console.log('Lab Hospital ID:', labTechHospitalId);
             
             // Populate initial patient suggestions
             populatePatientsTable();
@@ -1484,6 +1582,11 @@ module.exports = async function renderLabDashboard(userId) {
                 'id="techId" value=""', 
                 `id="techId" value="${labTech.technician_uuid || labTech.employee_id || ''}"`
             );
+             html = html.replace(
+                '<body>',
+                `<body data-lab-hospital-id="${labTech.hospital_id || ''}">`
+            );
+
         }
         
         if (stats) {
