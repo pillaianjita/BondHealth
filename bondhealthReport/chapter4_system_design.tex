@@ -21,13 +21,14 @@
 \justifying
 \noindent \textbf{Data Layer (Database Tier):} This layer manages persistent storage using Neon PostgreSQL, a serverless solution offering automatic scaling. Connections use the \texttt{@neondatabase/serverless} pooling adapter to eliminate per-request overhead. All primary keys use UUID v4. Native PostgreSQL arrays support multi-value attributes, and foreign key constraints enforce referential integrity. The serverless architecture eliminates database maintenance overhead while providing built-in high availability and automated backups.
 
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.9\textwidth]{images/chapter4/architecture.png}
 \caption{Three-Tier System Architecture of BondHealth Platform}
 \label{fig:ch4-architecture}
 \end{figure}
-
+\noindent Figure~\ref{fig:ch4-architecture} illustrates the three-tier architecture of the BondHealth platform. This architectural pattern separates presentation, application, and data layers, enabling independent scaling and maintenance of each component. The clear separation of concerns ensures that changes to the user interface do not affect business logic or database operations, improving overall system maintainability.
+\FloatBarrier
 % =============================================================================
 % 4.2 MAJOR SYSTEM WORKFLOWS
 % =============================================================================
@@ -40,13 +41,14 @@
 \justifying
 \noindent \textbf{Appointment Booking Flow:} Patients authenticate via JWT and search for doctors by specialization and availability. After selecting a time slot, database transactions prevent double-booking. The patient completes payment through an integrated gateway. Confirmation is dispatched via email, SMS, and in-app notifications. Both patient and doctor dashboards update immediately. This end-to-end flow typically completes in under thirty seconds.
 
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.95\textwidth]{images/chapter4/appointment-flow.png}
 \caption{Appointment Booking Data Flow Diagram}
 \label{fig:chapter4-appointment-flow}
 \end{figure}
-
+\noindent Figure~\ref{fig:chapter4-appointment-flow} presents the data flow diagram for the appointment booking workflow. The diagram shows how patient requests flow through authentication, doctor search, slot selection, payment processing, and confirmation stages. This end-to-end workflow typically completes in under thirty seconds, demonstrating the platform's efficiency in handling real-time booking operations.
+\FloatBarrier
 \justifying
 \noindent \textbf{Lab Report Processing Flow:} Lab technicians authenticate with a \texttt{lab} role and locate patients via UUID, name, or QR code. They select test types and enter results validated against reference ranges. Critical values trigger immediate alerts. A priority level is assigned to each report, and supporting files are virus-scanned before storage. Notifications are scaled to the priority level, ensuring urgent results are delivered without delay. This workflow reduces result delivery time from days to minutes.
 
@@ -62,16 +64,15 @@
 \justifying
 \noindent The BondHealth platform uses Neon PostgreSQL for automatic scaling and high availability. The schema defines all data and relationships using UUID primary keys, array data types, and comprehensive foreign key constraints. These design choices balance normalization requirements with query performance needs.
 
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{images/chapter4/schema.png}
 \caption{Database Entity-Relationship Diagram}
 \label{fig:schema}
 \end{figure}
-
 \justifying
-\noindent The Entity-Relationship diagram above illustrates the complete relational structure of the BondHealth database. At the center of the schema is the \texttt{users} table, which serves as the authentication anchor for all four system roles. Each role-specific table—\texttt{patients}, \texttt{doctors}, \texttt{lab\_technicians}, and \texttt{hospital\_admins}—references \texttt{users} through a foreign key on \texttt{user\_id}. This design provides a unified identity per account while eliminating separate credential stores for each role, simplifying both authentication and user management.
-
+\noindent The entity-relationship diagram shown in Figure~\ref{fig:schema} provides a complete visual representation of the BondHealth database structure. The diagram highlights the central role of the \texttt{users} table, which anchors authentication for all four system roles, and shows how foreign key relationships connect clinical records such as appointments, prescriptions, and lab reports. This schema design follows third normal form to eliminate redundancy while maintaining query performance through strategic indexes.
+\FloatBarrier
 \justifying
 \noindent The \texttt{hospitals} table acts as the second major anchoring entity, grouping doctors, medicines, and lab technicians under a specific healthcare facility. The \texttt{appointments} table sits at the intersection of patients and doctors, linking them with scheduling, status tracking, and payment information. Clinical output tables such as \texttt{lab\_reports} and \texttt{prescriptions} similarly bridge patients and doctors, capturing the results of medical encounters. The \texttt{payments} table maintains a one-to-one relationship with appointments, recording the complete financial transaction lifecycle from intent through settlement. Operational tables like \texttt{doctor\_leave} and \texttt{medicines} serve narrower but equally critical purposes, supporting leave management and pharmacy inventory respectively.
 
@@ -89,6 +90,8 @@
 \begin{table}[H]
 \small
 \centering
+\caption{Core Database Tables Schema}
+\label{tab:database-schema}
 \renewcommand{\arraystretch}{1.3}
 \begin{tabular}{|>{\raggedright\arraybackslash}p{2.6cm}|>{\raggedright\arraybackslash}p{6.3cm}|>{\raggedright\arraybackslash}p{4.7cm}|}
 \hline
@@ -115,10 +118,9 @@ medicines & Pharmacy inventory with stock levels. & medicine\_id (UUID), hospita
 payments & Financial transactions and gateway references. & payment\_id (UUID), appointment\_id, patient\_id, amount, status \\
 \hline
 \end{tabular}
-\caption{Core Database Tables Schema}
-\label{tab:database-schema}
 \end{table}
-
+\noindent Table~\ref{tab:database-schema} summarizes the ten core tables that constitute the BondHealth database schema. Each table serves a specific purpose in the healthcare management workflow, from user authentication and hospital management to clinical records and payment tracking. The table also indicates how UUID primary keys and foreign key constraints maintain referential integrity across the relational structure.
+\FloatBarrier
 \vspace{0.3cm}
 \noindent \textbf{Database Indexes:} Strategic indexes speed up \texttt{WHERE} clauses and joins. \texttt{CREATE INDEX idx\_users\_email ON users(email)} accelerates login. \texttt{CREATE INDEX idx\_doctors\_specialization ON doctors(specialization)} supports rapid discovery. \texttt{CREATE INDEX idx\_appointments\_date ON appointments(appointment\_date)} ensures date-range queries run without full table scans. Additional composite indexes are defined for common query patterns involving multiple filter conditions.
 
@@ -140,6 +142,8 @@ payments & Financial transactions and gateway references. & payment\_id (UUID), 
 \begin{table}[H]
 \small
 \centering
+\caption{Core API Endpoints}
+\label{tab:api-endpoints}
 \renewcommand{\arraystretch}{1.3}
 \begin{tabular}{|>{\raggedright\arraybackslash}p{1.6cm}|>{\raggedright\arraybackslash}p{5.1cm}|>{\raggedright\arraybackslash}p{4.2cm}|>{\raggedright\arraybackslash}p{2.9cm}|}
 \hline
@@ -188,10 +192,9 @@ GET & /api/messages/conversations & Chat history & Patient/Doctor \\
 POST & /api/messages & Send message & Patient/Doctor \\
 \hline
 \end{tabular}
-\caption{Core API Endpoints}
-\label{tab:api-endpoints}
 \end{table}
-
+\noindent Table~\ref{tab:api-endpoints} lists the core RESTful API endpoints exposed by the BondHealth platform. The endpoints are organized by functionality—authentication, patient operations, doctor operations, appointments, lab workflows, and administration—with each entry specifying the HTTP method, endpoint path, description, and required access level. All protected endpoints require a valid JWT token, and the API follows consistent versioning and error response conventions.
+\FloatBarrier
 % =============================================================================
 % 4.5 MODULE-WISE DETAILED DESIGN
 % =============================================================================
@@ -247,6 +250,8 @@ POST & /api/messages & Send message & Patient/Doctor \\
 \begin{table}[H]
 \small
 \centering
+\caption{Security Features Summary}
+\label{tab:ch4-security}
 \renewcommand{\arraystretch}{1.3}
 \begin{tabular}{|>{\raggedright\arraybackslash}p{2.8cm}|>{\raggedright\arraybackslash}p{3.8cm}|>{\raggedright\arraybackslash}p{6.8cm}|}
 \hline
@@ -271,10 +276,9 @@ Audit Logging & DB triggers & 7-year retention. Logs auth attempts and data acce
 File Security & ClamAV scanning & Type validation by magic numbers. Size limits enforced. \\
 \hline
 \end{tabular}
-\caption{Security Features Summary}
-\label{tab:ch4-security}
 \end{table}
-
+\noindent Table~\ref{tab:ch4-security} provides a comprehensive summary of security features implemented across all layers of the BondHealth platform. The table details authentication mechanisms using JWT with HTTP-only cookies, password security with bcrypt hashing, database encryption with TLS, session management using Redis, role-based access control middleware, input validation for SQL injection prevention, audit logging for compliance, and file security with virus scanning. This defense-in-depth approach ensures that compromising any single control does not grant full system access.
+\FloatBarrier
 \justifying
 \noindent \textbf{Data Encryption:} Data at rest uses Transparent Data Encryption (AES-256). Sensitive fields receive additional application-level encryption (AES-256-GCM). Files in object storage are encrypted server-side. Data in transit requires TLS 1.3 with certificate validation. All API endpoints use HSTS and perfect forward secrecy.
 
@@ -332,6 +336,8 @@ throw error;
 \begin{table}[H]
 \small
 \centering
+\caption{Third-party Integrations}
+\label{tab:integrations}
 \renewcommand{\arraystretch}{1.3}
 \begin{tabular}{|>{\raggedright\arraybackslash}p{3.0cm}|>{\raggedright\arraybackslash}p{2.8cm}|>{\raggedright\arraybackslash}p{7.6cm}|}
 \hline
@@ -354,10 +360,9 @@ Firebase Cloud Messaging & Push notifications & Cross-platform support. Topic-ba
 Google Maps API & Location services & Distance calculation. Address autocomplete. \\
 \hline
 \end{tabular}
-\caption{Third-party Integrations}
-\label{tab:integrations}
 \end{table}
-
+\noindent Table~\ref{tab:integrations} outlines the third-party services integrated with the BondHealth platform. These integrations extend core functionality to include payment processing via Stripe or Razorpay, SMS alerts through Twilio, email delivery using SendGrid, file storage on AWS S3 or Azure Blob, real-time messaging with Socket.io, calendar synchronization through Google Calendar API, push notifications via Firebase Cloud Messaging, and location services using Google Maps API. Each integration is abstracted behind a service wrapper with credentials stored securely in environment variables, allowing providers to be swapped without changes to application code.
+\FloatBarrier
 \subsection{Performance Optimization}
 
 \justifying

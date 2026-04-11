@@ -137,6 +137,8 @@
 \label{fig:architecture}
 \end{figure}
 
+\noindent Figure~\ref{fig:architecture} illustrates the three-tier architecture adopted for BondHealth. This architectural pattern separates presentation, application, and data layers, enabling independent scaling and maintenance of each component. The clear separation of concerns facilitates both monolithic deployment for smaller installations and microservices decomposition for larger enterprises.
+
 \justifying
 \noindent The BondHealth system follows a three-tier architecture with clear separation of concerns that enables independent development, deployment, and scaling of each layer. The presentation layer handles user interaction through HTML, CSS, and JavaScript. The application layer implements business logic using Node.js and Express.js. The data layer manages persistence through PostgreSQL with Neon serverless platform. This separation enables each tier to evolve independently, with load balancing distributing traffic across multiple application servers. The architecture supports both monolithic deployment for smaller installations and microservices decomposition for larger enterprises.
 
@@ -197,6 +199,8 @@
 
 \begin{table}[h]
 \centering
+\caption{User Roles and Access Levels}
+\label{tab:roles}
 \begin{tabular}{|l|l|}
 \hline
 \textbf{Role} & \textbf{Permissions} \\
@@ -210,9 +214,8 @@ Hospital Admin & Manage doctors, staff, inventory, view analytics \\
 Lab Technician & Upload reports, update status, share results \\
 \hline
 \end{tabular}
-\caption{User Roles and Access Levels}
-\label{tab:roles}
 \end{table}
+\noindent Table~\ref{tab:roles} summarizes the four primary user roles in BondHealth and their corresponding access permissions. Each role follows the principle of least privilege, ensuring users have only the permissions necessary to perform their job functions. The permission matrix defined in this table is enforced across all system modules through role-based access control middleware.
 
 \subsection{Audit and Compliance}
 

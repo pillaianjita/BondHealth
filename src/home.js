@@ -1770,9 +1770,64 @@ app.get('/api/appointments', authenticate, async (req, res) => {
     }
 });
 
+// ============================================
+// SLOT AVAILABILITY CHECK (double-booking guard)
+// GET /api/appointments/slots?doctor_id=<uuid>&date=<YYYY-MM-DD>
+// Returns an array of time strings that are already booked.
+// ============================================
+app.get('/api/appointments/slots', authenticate, async (req, res) => {
+    try {
+        const { doctor_id, date } = req.query;
+
+        if (!doctor_id || !date) {
+            return res.status(400).json({ error: 'doctor_id and date are required' });
+        }
+
+        const result = await query(
+            `SELECT appointment_time
+             FROM appointments
+             WHERE doctor_id = $1
+               AND appointment_date = $2::date
+               AND status NOT IN ('cancelled')`,
+            [doctor_id, date]
+        );
+
+        // Return just the time strings so the client can grey them out
+        const bookedSlots = result.rows.map(r =>
+            // Normalise to "HH:MM AM/PM" — strip seconds if present
+            String(r.appointment_time).substring(0, 5)
+        );
+
+        res.json({ bookedSlots });
+    } catch (error) {
+        console.error('Error fetching booked slots:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.post('/api/appointments', authenticate, authorize('patient'), async (req, res) => {
     try {
         const { doctor_id, appointment_date, appointment_time, reason, type, location } = req.body;
+
+        // --- ADD: double-booking guard ---
+        const conflict = await query(
+            `SELECT 1 FROM appointments
+             WHERE doctor_id = $1
+               AND appointment_date = $2::date
+               AND appointment_time = $3
+               AND status NOT IN ('cancelled')
+             LIMIT 1`,
+            [doctor_id, appointment_date, appointment_time]
+        );
+
+        if (conflict.rows.length > 0) {
+            return res.status(409).json({
+                success: false,
+                message: 'This time slot is already booked. Please choose a different time.'
+            });
+        }
+        // --- END ADD ---
+
         const patientResult = await query('SELECT patient_id FROM patients WHERE user_id = $1', [req.user.id]);
         const result = await query(
             `INSERT INTO appointments (patient_id, doctor_id, hospital_id, appointment_date, appointment_time, reason, type, location, status)
@@ -1784,7 +1839,6 @@ app.post('/api/appointments', authenticate, authorize('patient'), async (req, re
         res.status(500).json({ error: error.message });
     }
 });
-
 // Reschedule appointment
 app.put('/api/appointments/:id/reschedule', authenticate, async (req, res) => {
     const client = await getClient();

@@ -12,8 +12,10 @@
 \noindent The project runs on Node.js (v20 LTS) with the Express.js framework. The database is a serverless PostgreSQL instance hosted on Neon, accessed through the \texttt{@neondatabase/serverless} driver over WebSockets, requiring no persistent TCP connection pool. Sensitive configuration values — database connection strings, JWT secrets, payment gateway keys, and Socket.io settings — are stored in a \texttt{.env} file at the project root and loaded via the \texttt{dotenv} package.
 
 \vspace{1em}
-\begin{table}[ht]
+\begin{table}[H]
 \centering
+\caption{Project Folder Structure}     % ← ADD THIS
+\label{tab:folder-structure}     
 \begin{tabular}{ll}
 \hline
 \textbf{Path} & \textbf{Purpose} \\
@@ -27,10 +29,8 @@
 \texttt{/images/chapter5/} & Screenshots used in this chapter \\
 \hline
 \end{tabular}
-\caption{Project Folder Structure}
-\label{tab:folder-structure}
 \end{table}
-
+\noindent Table~\ref{tab:folder-structure} presents the project folder structure of the BondHealth implementation. This organisation separates routes, middleware, views, and static assets, following MVC architectural patterns for maintainability.
 \justifying
 \noindent The entry point \texttt{server.js} registers middleware (body parsing, cookie parsing, static files), mounts the route modules, and starts the HTTP server. Socket.io is attached to the same server instance so that WebSocket upgrade requests share the same port as REST traffic. Environment variables are validated at startup so that a missing or malformed configuration value causes the process to exit with a descriptive error immediately, rather than surfacing as a runtime failure during the first affected request.
 
@@ -48,14 +48,15 @@
 \noindent Subsequent requests are authenticated by the \texttt{verifyToken} middleware, which reads the cookie, verifies the signature, and attaches the decoded payload to \texttt{req.user}. Role-specific guards (\texttt{requirePatient}, \texttt{requireDoctor}, \texttt{requireAdmin}, \texttt{requireLab}) wrap \texttt{verifyToken} and additionally compare \texttt{req.user.role} against the expected value, returning 403 on mismatch.
 
 \justifying
-\noindent Failed login attempts beyond a configurable threshold trigger a temporary account lockout, recorded against the user record, to limit the effectiveness of credential-stuffing attacks. The logout route clears the HTTP-only cookie and invalidates the server-side session entry in Redis, ensuring that a stolen cookie cannot be replayed after the user has signed out. The login and registration page, shown in Figure~\ref{fig:login}, presents a role selector that updates the form dynamically without a page reload.
+\noindent Failed login attempts beyond a configurable threshold trigger a temporary account lockout, recorded against the user record, to limit the effectiveness of credential-stuffing attacks. The logout route clears the HTTP-only cookie and invalidates the server-side session entry in Redis, ensuring that a stolen cookie cannot be replayed after the user has signed out.
 
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{images/chapter5/login-page.png}
 \caption{Login and registration page with role selection.}
 \label{fig:login}
 \end{figure}
+\noindent The login and registration page, shown in Figure~\ref{fig:login}, presents a role selector that updates the form dynamically without a page reload.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Major Modules Implementation}
@@ -84,21 +85,20 @@
     \texttt{POST /patient/profile} validates field lengths and formats, then issues \texttt{UPDATE} on \texttt{patients} table. Password changes require \texttt{bcrypt.compare} verification of current password. Dual validation applied client-side and server-side.
 \end{itemize}
 
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{images/chapter5/dashboard-patient.png}
 \caption{Patient dashboard showing upcoming appointments, profile summary, and quick actions.}
 \label{fig:dashboard-patient}
 \end{figure}
-
-\begin{figure}[ht]
+\noindent The patient dashboard, shown in Figure~\ref{fig:dashboard-patient}, displays upcoming appointments, recent prescriptions, pending lab reports, and quick action buttons for booking appointments.
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{images/chapter5/appointment-booking.png}
 \caption{Appointment booking interface showing doctor search, time slot grid, and booking form.}
 \label{fig:appt-booking}
 \end{figure}
-
-\subsection{Doctor Module Implementation}
+\noindent The appointment booking interface, illustrated in Figure~\ref{fig:appt-booking}, allows patients to search doctors by specialization and select available time slots.\subsection{Doctor Module Implementation}
 \label{subsec:doctor-impl}
 
 \justifying
@@ -118,13 +118,13 @@
     Reports retrieved from \texttt{lab\_reports} filtered by \texttt{doctor\_id}. Doctor marks reports as reviewed via \texttt{PATCH}. Reports sorted with unreviewed entries first. Leave form submits to \texttt{POST /doctor/leave} inserting into \texttt{doctor\_leaves} with status \texttt{pending}.
 \end{itemize}
 
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{images/chapter5/dashboard-doctor.png}
 \caption{Doctor dashboard showing today's schedule, patient list, and lab report queue.}
 \label{fig:dashboard-doctor}
 \end{figure}
-
+\noindent The doctor dashboard, presented in Figure~\ref{fig:dashboard-doctor}, displays today's schedule, patient list, and pending lab report queue for clinical workflow management.
 \subsection{Admin Module Implementation}
 \label{subsec:admin-impl}
 
@@ -145,13 +145,13 @@
     \texttt{POST /admin/lab/create} follows two-table pattern. Admin specifies department and shift. Pending leave requests viewed from \texttt{doctor\_leaves} where \texttt{status = 'pending'}. Approval updates status to \texttt{approved}, causing availability query to exclude those dates.
 \end{itemize}
 
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{images/chapter5/dashboard-admin.png}
 \caption{Admin dashboard with statistics cards and management panels.}
 \label{fig:dashboard-admin}
 \end{figure}
-
+\noindent The hospital administrator dashboard, shown in Figure~\ref{fig:dashboard-admin}, displays statistics cards, doctor management, medicine inventory, and leave approval panels.
 \subsection{Lab Technician Module Implementation}
 \label{subsec:lab-impl}
 
@@ -166,13 +166,13 @@
     Renders paginated table of previously submitted reports ordered descending by date. Each row shows patient name, test name, submission date, and sharing status. Edit link opens in-place pre-populated form for correction within configurable time window. Edits after window elapsed disabled at route level.
 \end{itemize}
 
-\begin{figure}[ht]
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.85\textwidth]{images/chapter5/lab-report-form.png}
 \caption{Lab technician report submission form with patient selection and result entry.}
 \label{fig:lab-form}
 \end{figure}
-
+\noindent Figure~\ref{fig:lab-form} displays the lab technician report submission form with patient search, test selection, result entry, and sharing preference options.
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Payment Implementation}
 \label{sec:payment}

@@ -4,14 +4,13 @@
 \noindent Testing ensures the reliability, functionality, and quality of BondHealth across four user roles. Over 50 comprehensive test cases covered all major functionalities including authentication, patient management, doctor operations, admin functions, and lab workflows. A systematic testing approach was adopted throughout the development lifecycle, incorporating multiple testing levels and methodologies to identify defects early, verify correct behavior, and validate that the system meets both functional requirements and user expectations. This chapter presents the testing strategies employed, the results achieved, and the improvements made based on testing feedback.
 
 \section{Testing Strategy}
-\justifying
-\textbf{Unit Testing:} Unit testing focused on verifying individual components in isolation. Database queries for appointments, reports, and prescriptions were tested against sample data to confirm correct record retrieval under various conditions, including edge cases such as empty result sets and malformed input. Authentication functions including password hashing with bcrypt and JWT generation were validated to ensure tokens are created with correct payload and properly signed. Input validation routines in all registration forms were tested with both valid and invalid inputs to confirm error messages appear appropriately and malformed data is rejected. Utility functions handling date formatting, age calculation, and text processing were also verified across different input scenarios. Mock objects and test databases isolated units under test from external dependencies.
+\begin{itemize}
+    \item \textbf{Unit Testing:} Unit testing focused on verifying individual components in isolation. Database queries for appointments, reports, and prescriptions were tested against sample data to confirm correct record retrieval under various conditions, including edge cases such as empty result sets and malformed input. Authentication functions including password hashing with bcrypt and JWT generation were validated to ensure tokens are created with correct payload and properly signed. Input validation routines in all registration forms were tested with both valid and invalid inputs to confirm error messages appear appropriately and malformed data is rejected. Utility functions handling date formatting, age calculation, and text processing were also verified across different input scenarios. Mock objects and test databases isolated units under test from external dependencies.
 
-\justifying
-\noindent \textbf{Integration Testing:} Integration testing verified that modules interact correctly when combined into complete workflows. The login-to-session flow was tested to confirm that successful authentication creates a valid session and grants access to protected routes while preventing access without proper credentials. Patient appointment booking was validated end-to-end, from doctor selection through slot availability checking to confirmation and notification delivery, including verification that availability is properly updated after booking. The lab report workflow was tested to ensure that when a technician uploads a report, it becomes immediately visible to the associated doctor and accessible to the patient. Prescription workflows were validated to confirm doctors can write prescriptions and patients can request refills. Database transaction tests ensured that operations spanning multiple tables either complete entirely or roll back completely.
+    \item \textbf{Integration Testing:} Integration testing verified that modules interact correctly when combined into complete workflows. The login-to-session flow was tested to confirm that successful authentication creates a valid session and grants access to protected routes while preventing access without proper credentials. Patient appointment booking was validated end-to-end, from doctor selection through slot availability checking to confirmation and notification delivery, including verification that availability is properly updated after booking. The lab report workflow was tested to ensure that when a technician uploads a report, it becomes immediately visible to the associated doctor and accessible to the patient. Prescription workflows were validated to confirm doctors can write prescriptions and patients can request refills. Database transaction tests ensured that operations spanning multiple tables either complete entirely or roll back completely.
 
-\justifying
-\noindent \textbf{System Testing:} System testing encompassed comprehensive validation across all functional and non-functional requirements. Functional testing exercised all 50+ features across the four user roles. UI/UX testing evaluated responsiveness and accessibility across different screen sizes. Security testing verified authentication mechanisms, authorization controls, and data protection measures. Performance testing measured response times under various load conditions, including peak load simulations with 1000 concurrent users. Cross-browser testing confirmed consistent behavior across Chrome, Firefox, Safari, and Edge browsers. Responsive design testing validated the user experience on desktop monitors, tablets, and mobile phones. Regression testing was performed after each bug fix and feature addition to verify existing functionality remained unaffected.
+    \item \textbf{System Testing:} System testing encompassed comprehensive validation across all functional and non-functional requirements. Functional testing exercised all 50+ features across the four user roles. UI/UX testing evaluated responsiveness and accessibility across different screen sizes. Security testing verified authentication mechanisms, authorization controls, and data protection measures. Performance testing measured response times under various load conditions, including peak load simulations with 1000 concurrent users. Cross-browser testing confirmed consistent behavior across Chrome, Firefox, Safari, and Edge browsers. Responsive design testing validated the user experience on desktop monitors, tablets, and mobile phones. Regression testing was performed after each bug fix and feature addition to verify existing functionality remained unaffected.
+\end{itemize}
 
 \section{Test Results Summary}
 
@@ -20,6 +19,8 @@
 
 \begin{table}[H]
     \centering
+    \caption{Overall Test Results}
+    \label{tab:test-summary}
     \small
     \begin{tabular}{|p{2.5cm}|c|c|c|}
         \hline
@@ -46,9 +47,8 @@
         \textbf{Total} & \textbf{65} & \textbf{64} & \textbf{98.5\%} \\
         \hline
     \end{tabular}
-    \caption{Overall Test Results}
-    \label{tab:test-summary}
 \end{table}
+\noindent Table~\ref{tab:test-summary} presents the overall test results across all functional categories. The system achieved a 98.5\% pass rate with 64 out of 65 test cases succeeding, demonstrating high reliability across authentication, patient, doctor, admin, lab, performance, cross-browser, responsive design, and security testing.
 
 \justifying
 \noindent The single failed test case in the Patient Module related to an edge case in appointment cancellation where notifications were not consistently sent when cancellations occurred within one hour of the appointment time. This issue was identified, documented, and scheduled for resolution in the next development sprint. All other test categories achieved 100\% pass rates, demonstrating the overall stability and reliability of the system. Performance tests confirmed that page loads average under 2.5 seconds under normal load, with API responses averaging 150 milliseconds for standard operations. Security tests validated that all identified vulnerabilities were properly addressed, with no critical or high-severity issues remaining in the system.
@@ -58,20 +58,17 @@
 \justifying
 \noindent This section outlines the security vulnerabilities tested and the measures implemented to protect the system from common attacks. Security testing was performed throughout the development lifecycle, with dedicated penetration testing conducted after feature completion.
 
-\justifying
-\noindent \textbf{SQL Injection Prevention:} Parameterized queries are used throughout the codebase where input values are passed separately from the SQL structure using placeholders like \$1, \$2. This ensures that even malicious input containing SQL syntax is treated as data rather than executable code. Testing included attempts to inject SQL through all user input fields, with none succeeding.
+\begin{itemize}
+    \item \textbf{SQL Injection Prevention:} Parameterized queries are used throughout the codebase where input values are passed separately from the SQL structure using placeholders. This ensures that even malicious input containing SQL syntax is treated as data rather than executable code. Testing included attempts to inject SQL through all user input fields, with none succeeding.
 
-\justifying
-\noindent \textbf{Cross-Site Scripting (XSS) Protection:} Input sanitization is applied to all user-submitted content before rendering, removing or escaping malicious script tags. HTTP-only cookies store JWT tokens, preventing client-side script access. Content Security Policy headers restrict script sources. Testing included attempts to inject scripts through profile fields and form inputs, with all attempts properly escaped.
+    \item \textbf{Cross-Site Scripting (XSS) Protection:} Input sanitization is applied to all user-submitted content before rendering, removing or escaping malicious script tags. HTTP-only cookies store JWT tokens, preventing client-side script access. Content Security Policy headers restrict script sources. Testing included attempts to inject scripts through profile fields and form inputs, with all attempts properly escaped.
 
-\justifying
-\noindent \textbf{CSRF Defense and Session Hijacking Prevention:} JWT tokens stored in HTTP-only cookies with SameSite=Strict provide CSRF protection. The Secure flag ensures cookies are only transmitted over HTTPS. Token expiration is set to seven days, with active session tracking allowing server-side invalidation. Testing confirmed cookies were properly configured and tokens inaccessible through JavaScript.
+    \item \textbf{CSRF Defense and Session Hijacking Prevention:} JWT tokens stored in HTTP-only cookies with SameSite attributes provide CSRF protection. The Secure flag ensures cookies are only transmitted over HTTPS. Token expiration is set to seven days, with active session tracking allowing server-side invalidation. Testing confirmed cookies were properly configured and tokens inaccessible through JavaScript.
 
-\justifying
-\noindent \textbf{Password Security and RBAC:} All passwords are hashed using bcrypt with a salt factor of 10, using timing-safe comparison functions. Password complexity requirements enforce minimum length of 8 characters with mixed case, numbers, and special characters. Middleware functions check user roles before granting access to any protected route, with role information encoded in JWT tokens and verified on each request. Testing confirmed passwords are never stored in plaintext and unauthorized endpoint access is properly rejected.
+    \item \textbf{Password Security and RBAC:} All passwords are hashed using bcrypt with a salt factor, using timing-safe comparison functions. Password complexity requirements enforce minimum length with mixed case, numbers, and special characters. Middleware functions check user roles before granting access to any protected route, with role information encoded in JWT tokens and verified on each request. Testing confirmed passwords are never stored in plaintext and unauthorized endpoint access is properly rejected.
 
-\justifying
-\noindent \textbf{JWT Tampering Detection:} All JWTs include a signature generated using a server-side secret key stored in environment variables. Any modification to the token payload invalidates the signature, causing token rejection. Testing confirmed modified tokens were consistently rejected and token expiration properly enforced.
+    \item \textbf{JWT Tampering Detection:} All JWTs include a signature generated using a server-side secret key stored in environment variables. Any modification to the token payload invalidates the signature, causing token rejection. Testing confirmed modified tokens were consistently rejected and token expiration properly enforced.
+\end{itemize}
 
 \section{Usability Testing and Improvements}
 
@@ -92,6 +89,8 @@
 \begin{table}[H]
     \centering
     \small
+    \caption{Bug Tracking Summary}
+    \label{tab:bugs}
     \begin{tabular}{|p{2.5cm}|c|c|c|}
         \hline
         \textbf{Severity} & \textbf{Found} & \textbf{Fixed} & \textbf{Status} \\
@@ -107,29 +106,28 @@
         \textbf{Total} & \textbf{59} & \textbf{56} & \textbf{95\%} \\
         \hline
     \end{tabular}
-    \caption{Bug Tracking Summary}
-    \label{tab:bugs}
 \end{table}
+\noindent Table~\ref{tab:bugs} summarizes the bug tracking results by severity level. A total of 59 bugs were identified during testing, with 56 resolved (95\% resolution rate), including all critical and high-severity issues.
 
 \justifying
 \noindent Critical bugs included authentication failures, data loss in appointment scheduling under race conditions, and security vulnerabilities. All critical bugs were addressed within 24 hours. High-severity bugs included functionality failures in non-critical paths such as search filters. Medium-severity bugs encompassed incorrect formatting and UI inconsistencies. Low-severity bugs included typographical errors and minor styling issues.
 
-\justifying
-\noindent \textbf{Common Bugs Resolved:} Date and time formatting inconsistencies across different browsers required normalization to use ISO formats internally. Image upload functionality added file size validation to prevent server overload. Appointment rescheduling logic conflicts were fixed using transaction isolation and row-level locks. Report PDF generation encoding issues with special characters were resolved using UTF-8 throughout. Duplicate review submissions were prevented with client-side button disabling and server-side uniqueness checks. Session timeout handling was improved to gracefully redirect users to login with clear messages.
+\begin{itemize}
+    \item \textbf{Common Bugs Resolved:} Date and time formatting inconsistencies across different browsers required normalization to use ISO formats internally. Image upload functionality added file size validation to prevent server overload. Appointment rescheduling logic conflicts were fixed using transaction isolation and row-level locks. Report PDF generation encoding issues with special characters were resolved using UTF-8 throughout. Duplicate review submissions were prevented with client-side button disabling and server-side uniqueness checks. Session timeout handling was improved to gracefully redirect users to login with clear messages.
+\end{itemize}
 
 \section{Test Environment}
 
 \justifying
 \noindent This section describes the hardware, software, and tools used during the testing process. Testing was conducted in environments designed to represent real-world usage conditions while allowing controlled experimentation.
 
-\justifying
-\noindent \textbf{Hardware Configuration:} Testing was conducted on systems with Intel i7 processors, 16GB RAM, and 512GB SSD storage. Additional testing on lower-spec hardware with 4GB RAM confirmed acceptable performance on older systems. Mobile testing utilized Android devices (Samsung Galaxy, Google Pixel) and iOS devices (iPhone 12 through 15). Tablet testing included iPad Pro and Samsung Galaxy Tab devices. Network condition simulation tested performance under various bandwidth and latency conditions.
+\begin{itemize}
+    \item \textbf{Hardware Configuration:} Testing was conducted on systems with Intel i7 processors, 16GB RAM, and 512GB SSD storage. Additional testing on lower-spec hardware with 4GB RAM confirmed acceptable performance on older systems. Mobile testing utilized Android devices (Samsung Galaxy, Google Pixel) and iOS devices (iPhone 12 through 15). Tablet testing included iPad Pro and Samsung Galaxy Tab devices. Network condition simulation tested performance under various bandwidth and latency conditions.
 
-\justifying
-\noindent \textbf{Operating Systems and Browser Coverage:} Test environments included Windows 10 and 11, macOS Monterey through Sonoma, and Linux distributions (Ubuntu 20.04/22.04 LTS, CentOS 7). Mobile testing covered Android 11-14 and iOS 15-17. Functional and UI testing was performed on Chrome 120+, Firefox 121+, Safari 17+, and Edge 120+, including both desktop and mobile versions.
+    \item \textbf{Operating Systems and Browser Coverage:} Test environments included Windows 10 and 11, macOS Monterey through Sonoma, and Linux distributions (Ubuntu 20.04/22.04 LTS, CentOS 7). Mobile testing covered Android 11-14 and iOS 15-17. Functional and UI testing was performed on Chrome 120+, Firefox 121+, Safari 17+, and Edge 120+, including both desktop and mobile versions.
 
-\justifying
-\noindent \textbf{Testing Tools:} Chrome DevTools was used for debugging, performance profiling, and responsive design testing. Postman facilitated API endpoint testing with automated test scripts. Lighthouse provided performance, accessibility, and SEO metrics. GitHub Issues tracked bug reports. Jest was used for unit testing with coverage reporting. Selenium WebDriver automated browser testing for critical workflows. Load testing tools including k6 simulated concurrent user loads.
+    \item \textbf{Testing Tools:} Chrome DevTools was used for debugging, performance profiling, and responsive design testing. Postman facilitated API endpoint testing with automated test scripts. Lighthouse provided performance, accessibility, and SEO metrics. GitHub Issues tracked bug reports. Jest was used for unit testing with coverage reporting. Selenium WebDriver automated browser testing for critical workflows. Load testing tools including k6 simulated concurrent user loads.
+\end{itemize}
 
 \section{Coverage Summary}
 
@@ -139,6 +137,8 @@
 \begin{table}[H]
     \centering
     \small
+    \caption{Test Coverage Summary}
+    \label{tab:coverage}
     \begin{tabular}{|p{3cm}|c|}
         \hline
         \textbf{Coverage Type} & \textbf{Percentage} \\
@@ -154,9 +154,8 @@
         User Experience Coverage & 95\% \\
         \hline
     \end{tabular}
-    \caption{Test Coverage Summary}
-    \label{tab:coverage}
 \end{table}
+\noindent Table~\ref{tab:coverage} shows the test coverage percentages across different quality dimensions. Functional coverage reached 98\%, security coverage achieved 100\%, and overall code coverage stood at 85\%.
 
 \justifying
 \noindent Functional coverage of 98\% indicates nearly all requirements have corresponding test cases. Code coverage of 85\% means most of the codebase is exercised by automated tests. Security coverage of 100\% reflects comprehensive security testing including automated scanning and manual penetration testing. Performance coverage of 90\% indicates most performance-critical paths have been load tested. User experience coverage of 95\% represents the percentage of user workflows validated through usability testing.

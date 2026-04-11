@@ -1443,6 +1443,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
           
           document.querySelectorAll('#timeSlots .time-slot').forEach(slot => {
             slot.addEventListener('click', () => {
+              if (slot.disabled) return;                  // ignore clicks on booked slots
               document.querySelectorAll('#timeSlots .time-slot').forEach(s => {
                 s.classList.remove('selected');
               });
@@ -1461,7 +1462,27 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
             });
           });
           
-          document.getElementById('appointmentDate').addEventListener('change', updateConfirmButton);
+          document.getElementById('appointmentDate').addEventListener('change', async function () {
+            selectedDate = this.value;
+            selectedTime = '';                            // reset previously selected time
+            document.getElementById('confirmBooking').disabled = true;
+
+            if (!selectedDate || !selectedDoctor) {
+              resetTimeSlots([]);
+              return;
+            }
+
+            try {
+              const res = await fetch(
+                '/api/appointments/slots?doctor_id=' + selectedDoctor.doctor_id + '&date=' + selectedDate
+              );
+              const data = await res.json();
+              resetTimeSlots(data.bookedSlots || []);
+            } catch (e) {
+              console.error('Could not fetch booked slots:', e);
+              resetTimeSlots([]);
+            }
+          });
           
           document.getElementById('rescheduleDate').addEventListener('change', updateRescheduleConfirmButton);
           
@@ -1847,10 +1868,10 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
           const doctors = await fetch('/api/doctors').then(res => res.json());
           selectedDoctor = doctors.find(d => d.doctor_id === doctorId);
           if (!selectedDoctor) return;
-          
+
           const modal = document.getElementById('bookingModal');
           const doctorInfo = document.getElementById('modalDoctorInfo');
-          
+
           doctorInfo.innerHTML = \`
             <div class="w-12 h-12 rounded-lg cyan-light border-2 cyan-border flex items-center justify-center flex-shrink-0">
               <i class="fas fa-user-md text-xl cyan-text"></i>
@@ -1864,22 +1885,41 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
               </div>
             </div>
           \`;
-          
+
           const today = new Date().toISOString().split('T')[0];
           document.getElementById('appointmentDate').min = today;
           document.getElementById('appointmentDate').value = '';
-          
+
           selectedDate = '';
           selectedTime = '';
-          document.querySelectorAll('#timeSlots .time-slot').forEach(slot => {
-            slot.classList.remove('selected');
-          });
+          resetTimeSlots([]);                          // reset with no booked info yet
           document.getElementById('visitReason').value = '';
           document.getElementById('confirmBooking').disabled = true;
-          
           modal.classList.remove('hidden');
         }
         
+        // Resets all time-slot buttons; greys out any that are in bookedSlots.
+        // bookedSlots: string[] like ["09:00", "14:00"]
+        function resetTimeSlots(bookedSlots) {
+          document.querySelectorAll('#timeSlots .time-slot').forEach(slot => {
+            slot.classList.remove('selected');
+
+            // Each slot's data-time is like "09:00 AM"; normalise to "HH:MM" for comparison
+            const slotTime = slot.dataset.time.substring(0, 5);
+            const isBooked = bookedSlots.includes(slotTime);
+
+            if (isBooked) {
+              slot.disabled = true;
+              slot.classList.add('opacity-40', 'cursor-not-allowed', 'line-through');
+              slot.title = 'This slot is already booked';
+            } else {
+              slot.disabled = false;
+              slot.classList.remove('opacity-40', 'cursor-not-allowed', 'line-through');
+              slot.title = '';
+            }
+          });
+        }
+
         window.openBookingModal = openBookingModal;
         
         function filterByHospital(hospitalName) {
@@ -1895,12 +1935,12 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         
         function updateConfirmButton() {
           const dateInput = document.getElementById('appointmentDate');
-          const timeSlot = document.querySelector('#timeSlots .time-slot.selected');
+          const timeSlot = document.querySelector('#timeSlots .time-slot.selected:not(:disabled)');
           const btn = document.getElementById('confirmBooking');
-          
+
           selectedDate = dateInput.value;
           selectedTime = timeSlot ? timeSlot.dataset.time : '';
-          
+
           btn.disabled = !selectedDate || !selectedTime;
         }
         
@@ -1941,11 +1981,24 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
             if (response.ok) {
               showToast('Success', 'Appointment booked successfully!', 'success');
               document.getElementById('bookingModal').classList.add('hidden');
-              
               setTimeout(() => {
                 document.querySelector('[data-section="appointments"]').click();
                 window.location.reload();
               }, 1500);
+            } else if (response.status === 409) {
+              // Slot was grabbed by someone else between open and submit
+              const error = await response.json();
+              showToast('Slot Unavailable', error.message || 'This slot was just booked. Please pick another time.', 'error');
+              // Re-fetch booked slots so the UI reflects the new reality
+              if (selectedDoctor && selectedDate) {
+                const slotsRes = await fetch(
+                  '/api/appointments/slots?doctor_id=' + selectedDoctor.doctor_id + '&date=' + selectedDate
+                );
+                const slotsData = await slotsRes.json();
+                resetTimeSlots(slotsData.bookedSlots || []);
+              }
+              selectedTime = '';
+              document.getElementById('confirmBooking').disabled = true;
             } else {
               const error = await response.json();
               showToast('Error', error.message || 'Failed to book appointment', 'error');
