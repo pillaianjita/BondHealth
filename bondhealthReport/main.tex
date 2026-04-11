@@ -1,4 +1,4 @@
-\documentclass[10pt,b5paper]{report}
+\documentclass[10pt]{report}
 
 % Packages
 \usepackage[utf8]{inputenc}
@@ -134,7 +134,8 @@
 
 % Page layout
 \geometry{
-    b5paper,
+    paperwidth=7.17in,
+    paperheight=10.12in,
     top=0.6in,
     bottom=0.6in,
     left=0.7in,
@@ -196,7 +197,7 @@
 \fancypagestyle{reportstyle}{
     \fancyhf{}
     \fancyhead[L]{BondHealth}
-    \fancyhead[R]{\thepage}
+    \fancyhead[R]{}
     \renewcommand{\headrulewidth}{0.5pt}
     \renewcommand{\footrulewidth}{0.4pt}
     \fancyfoot[L]{Division of Computer Science}

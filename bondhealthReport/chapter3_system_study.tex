@@ -118,21 +118,22 @@
 
 \section{System Architecture Overview}
 
-\begin{figure}[h]
+\begin{figure}[H]
 \centering
-\fbox{\begin{minipage}{0.8\textwidth}
-\centering
-\textbf{Three-Tier Architecture}
-\begin{itemize}
-\item \textbf{Presentation Layer:} HTML, CSS, JavaScript, Tailwind CSS
-\item \textbf{Application Layer:} Node.js, Express.js
-\item \textbf{Data Layer:} PostgreSQL Database
-\end{itemize}
-\end{minipage}}
+\resizebox{0.8\textwidth}{!}{%
+\begin{tabular}{|l|}
+\hline
+\textbf{Three-Tier Architecture} \\
+\hline
+\textbf{Presentation:} HTML, CSS, JavaScript, Tailwind CSS \\
+\textbf{Application:} Node.js, Express.js \\
+\textbf{Data:} PostgreSQL Database \\
+\hline
+\end{tabular}%
+}
 \caption{BondHealth Three-Tier Architecture}
 \label{fig:architecture}
 \end{figure}
-
 \noindent Figure~\ref{fig:architecture} illustrates the three-tier architecture adopted for BondHealth. This architectural pattern separates presentation, application, and data layers, enabling independent scaling and maintenance of each component. The clear separation of concerns facilitates both monolithic deployment for smaller installations and microservices decomposition for larger enterprises.
 
 \justifying

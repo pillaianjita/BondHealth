@@ -140,7 +140,16 @@ payments & Financial transactions and gateway references. & payment ID (UUID), a
 \noindent The API is organized into logical groups: authentication, patient management, doctor operations, appointments, lab workflows, prescriptions, and administration. Middleware for role verification, validation, and rate limiting is applied at the router level. List endpoints support pagination parameters, returning a standardized envelope with metadata. API versioning supports future changes.
 
 \justifying
-\noindent Error responses use a consistent JSON structure with an error code and message. HTTP status codes are standard: success codes for successful operations, validation error codes for malformed input, authentication error codes for unauthenticated requests, forbidden error codes for unauthorized access, and not found error codes for missing resources. Rate limiting protects sensitive endpoints like login and payment. Background operations return an accepted response immediately, while synchronous operations return a definitive outcome. The table below lists core endpoints.
+\noindent Error responses use a consistent JSON structure with an error code and message. HTTP status codes are standard: success codes for successful operations, validation error codes for malformed input, authentication error codes for unauthenticated requests, forbidden error codes for unauthorized access, and not found error codes for missing resources. Rate limiting protects sensitive endpoints like login and payment. Background operations return an accepted response immediately, while synchronous operations return a definitive outcome.
+
+\justifying
+\noindent All API endpoints are designed to be idempotent where appropriate, ensuring that repeated requests with the same parameters produce the same result without unintended side effects. This is particularly important for payment processing and appointment creation, where duplicate requests could otherwise lead to double billing or duplicate bookings. The API also implements conditional requests using ETags, allowing clients to cache responses and reduce unnecessary network traffic when resources have not changed.
+
+\justifying
+\noindent Request validation occurs at multiple levels within the API pipeline. Basic validation checks for required fields and data types, while business logic validation ensures operations comply with domain rules such as appointment time availability and prescription dosage limits. Validation errors return detailed messages indicating which fields failed validation and why, enabling clients to correct issues without guessing. The API also supports batch operations for common workflows, allowing clients to submit multiple related requests in a single API call, reducing latency and improving throughput.
+
+\justifying
+\noindent Authentication and authorization are enforced consistently across all protected endpoints. The JWT token embedded in the HTTP-only cookie is validated on every request, with role information extracted to determine access permissions. Session tracking maintains a record of active sessions, allowing administrators to revoke access remotely if needed. The API also logs all requests for audit purposes, capturing timestamp, user identity, endpoint accessed, and response status. These logs are retained for compliance purposes and can be queried through administrative endpoints. The table below lists core endpoints.
 
 \begin{table}[H]
 \small
@@ -251,6 +260,12 @@ POST & /api/messages & Send message & Patient/Doctor \\
 
 \justifying
 \noindent BondHealth uses defense-in-depth security at every layer. Principles include Least Privilege, Secure by Default, and Complete Mediation. Security measures are applied at the network boundary, application layer, database tier, and file storage layer. The table below summarizes these measures. This layered approach ensures that compromising any single control does not grant an attacker full system access, as additional controls remain in place at other layers.
+
+\justifying
+\noindent At the network boundary, Web Application Firewall rules filter malicious traffic and DDoS protection mechanisms ensure service availability. All traffic is routed through load balancers that terminate TLS connections, offloading encryption overhead from application servers. Within the application layer, input validation occurs on both client and server sides, and all database queries use parameterized statements to prevent SQL injection. The authentication system enforces strong password policies with progressive delays after failed login attempts, and session management includes automatic timeout after inactivity.
+
+\justifying
+\noindent The database tier employs column-level encryption for sensitive fields, with database access restricted to specific service accounts. Connection strings are retrieved from secure secret management services rather than hard-coded. File storage security ensures uploaded documents are scanned for malware, with access controlled through signed URLs that expire after a configurable time window. Regular security assessments include automated vulnerability scanning, dependency checking, and periodic penetration testing. All security events are aggregated in a centralized monitoring system for real-time alerting and forensic investigation. The table below provides a comprehensive summary of security features implemented across all layers of the BondHealth platform.
 
 \begin{table}[H]
 \small
