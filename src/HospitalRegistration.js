@@ -1350,13 +1350,55 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 submitBtn.disabled   = true;
 
                 try {
-                    const formData = getFormData();
+                    // Build FormData to include files
+                    const formDataObj = new FormData();
 
-                    // ✅ FIX #5: Send data to the backend API endpoint
+                    // Add all text fields
+                    Object.keys(getFormData()).forEach(key => {
+                        const value = getFormData()[key];
+                        if (typeof value === 'string') {
+                            formDataObj.append(key, value);
+                        } else if (Array.isArray(value)) {
+                            formDataObj.append(key, JSON.stringify(value));
+                        } else if (typeof value === 'object') {
+                            formDataObj.append(key, JSON.stringify(value));
+                        }
+                    });
+
+                    // Add hospital logo file
+                    if (hospitalLogoData) {
+                        const logoFile = document.getElementById('hospitalLogo').files[0];
+                        if (logoFile) {
+                            formDataObj.append('hospitalLogo', logoFile);
+                        }
+                    }
+
+                    // Add hospital photos files
+                    const photosInput = document.getElementById('hospitalPhotos');
+                    if (photosInput && photosInput.files.length > 0) {
+                        Array.from(photosInput.files).forEach(file => {
+                            formDataObj.append('hospitalPhotos', file);
+                        });
+                    }
+
+                    // Add documents
+                    const documentsArray = [
+                        { id: 'regCertificate',  name: 'regCertificate' },
+                        { id: 'hospitalLicense', name: 'hospitalLicense' },
+                        { id: 'tradeLicense',    name: 'tradeLicense' },
+                        { id: 'panCard',         name: 'panCard' }
+                    ];
+
+                    documentsArray.forEach(doc => {
+                        const fileInput = document.getElementById(doc.id);
+                        if (fileInput && fileInput.files.length > 0) {
+                            formDataObj.append(doc.name, fileInput.files[0]);
+                        }
+                    });
+
                     const response = await fetch('/api/hospitals/register', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(formData)
+                        body: formDataObj  // ✅ Changed: use FormData instead of JSON
                     });
 
                     const result = await response.json();
@@ -1640,8 +1682,11 @@ successMessage.style.display = 'block';
 // ============================================
 // API ENDPOINT HANDLER (used by home.js / router)
 // ============================================
-async function handleHospitalRegistration(reqBody) {
+async function handleHospitalRegistration(reqBody, logoFile, photosFiles) {
     const client = await getClient();
+    const fs = require('fs');
+    const path = require('path');
+    
     try {
         await client.query('BEGIN');
 
@@ -1655,14 +1700,47 @@ async function handleHospitalRegistration(reqBody) {
             adminName,
             designation,
             adminEmail,
-            password,       // ✅ FIX #4: use the password submitted by the form
+            password,
             departments,
-            facultyServices,    // array  e.g. ['Service A', 'Service B']
-            hospitalLogo,       // string (file name)
-            hospitalPhotos,     // array  of file names
+            facultyServices,
             documents 
         } = reqBody;
-        
+
+        // ✅ SAVE HOSPITAL LOGO TO DISK
+        let logoFilename = null;
+        if (logoFile) {
+            const logoDir = path.join(__dirname, 'uploads', 'hospitals', 'logos');
+            if (!fs.existsSync(logoDir)) {
+                fs.mkdirSync(logoDir, { recursive: true });
+            }
+            
+            // Generate unique filename
+            const timestamp = Date.now();
+            const ext = path.extname(logoFile.originalname);
+            logoFilename = `hospital_logo_${timestamp}${ext}`;
+            const logoPath = path.join(logoDir, logoFilename);
+            
+            fs.writeFileSync(logoPath, logoFile.buffer);
+        }
+
+        // ✅ SAVE HOSPITAL PHOTOS TO DISK
+        let photoFilenames = [];
+        if (photosFiles && photosFiles.length > 0) {
+            const photosDir = path.join(__dirname, 'uploads', 'hospitals', 'photos');
+            if (!fs.existsSync(photosDir)) {
+                fs.mkdirSync(photosDir, { recursive: true });
+            }
+            
+            photosFiles.forEach(file => {
+                const timestamp = Date.now();
+                const ext = path.extname(file.originalname);
+                const filename = `hospital_photo_${timestamp}_${Math.random().toString(36).substr(2, 9)}${ext}`;
+                const filePath = path.join(photosDir, filename);
+                
+                fs.writeFileSync(filePath, file.buffer);
+                photoFilenames.push(filename);
+            });
+        }
         if (!hospitalName || !adminEmail || !password) {
             return { success: false, error: 'Missing required fields.' };
         }
@@ -1670,12 +1748,9 @@ async function handleHospitalRegistration(reqBody) {
         // Insert hospital record
         const hospitalResult = await client.query(
             `INSERT INTO hospitals (hospital_uuid, name, type, registration_number, city, phone, email, departments, faculty_services, logo_filename, photo_filenames, doc_reg_certificate, doc_hospital_license, doc_trade_license, doc_pan_card)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-             RETURNING hospital_id, hospital_uuid`,
-            ['HOSP-' + Date.now(), hospitalName, hospitalType, registrationNumber || null, city, contactNo || null, officialEmail, departments || [], facultyServices || [], hospitalLogo || null, hospitalPhotos || [], documents?.regCertificate  || null,
-documents?.hospitalLicense || null,
-documents?.tradeLicense    || null,
-documents?.panCard         || null]
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            RETURNING hospital_id, hospital_uuid`,
+            ['HOSP-' + Date.now(), hospitalName, hospitalType, registrationNumber || null, city, contactNo || null, officialEmail, departments || [], facultyServices || [], logoFilename, photoFilenames, documents?.regCertificate || null, documents?.hospitalLicense || null, documents?.tradeLicense || null, documents?.panCard || null]
         );
 
         const hospitalId = hospitalResult.rows[0].hospital_id;
@@ -1735,3 +1810,4 @@ module.exports = function renderHospitalRegistration() {
     return HTML_TEMPLATE;
 };
 module.exports.handleRegistration = handleHospitalRegistration;
+module.exports.getHTMLTemplate = () => HTML_TEMPLATE;

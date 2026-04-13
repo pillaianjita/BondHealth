@@ -7,7 +7,9 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 require('dotenv').config();
 const { query, getClient } = require('./db/config');
-
+const http = require('http');
+const chatServer = require('./Chat');
+const { generateChatRoomHTML } = require('./Chatroom');
 const app = express();
 const PORT = process.env.PORT || 3005;
 const { handleRegistration } = require('./HospitalRegistration');
@@ -28,7 +30,16 @@ let activeSessions = new Map();
 // ============================================
 // UPLOAD DIRECTORIES
 // ============================================
-const uploadDirs = ['./uploads', './uploads/reports', './uploads/scans', './uploads/temp'];
+const UPLOADS_ROOT = path.join(__dirname, '..', 'uploads'); // go up one level from src/
+const uploadDirs = [
+    UPLOADS_ROOT,
+    path.join(UPLOADS_ROOT, 'reports'),
+    path.join(UPLOADS_ROOT, 'scans'),
+    path.join(UPLOADS_ROOT, 'temp'),
+    path.join(UPLOADS_ROOT, 'photos'),
+    path.join(UPLOADS_ROOT, 'hospitals', 'logos'),
+    path.join(UPLOADS_ROOT, 'hospitals', 'photos'),
+];
 uploadDirs.forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
@@ -1142,15 +1153,31 @@ app.get('/register-doctor', requireAuth('admin'), async (req, res) => {
 // ── Inside your http.createServer request handler ────────────
 // Route: POST /api/hospitals/register
 
-app.post('/api/hospitals/register', async (req, res) => {
-    try {
-        const result = await handleRegistration(req.body);
-        res.status(result.success ? 200 : 400).json(result);
-    } catch (err) {
-        console.error('Route error /api/hospitals/register:', err.message);
-        res.status(500).json({ success: false, error: 'Server error. Please try again.' });
-    }
+// Use multer middleware for file uploads
+const multer = require('multer');
+const hospitalUpload = multer({ 
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
 });
+
+app.post('/api/hospitals/register', 
+    hospitalUpload.fields([
+        { name: 'hospitalLogo', maxCount: 1 },
+        { name: 'hospitalPhotos', maxCount: 5 }
+    ]), 
+    async (req, res) => {
+        try {
+            const logoFile = req.files?.hospitalLogo?.[0] || null;
+            const photosFiles = req.files?.hospitalPhotos || [];
+            
+            const result = await handleRegistration(req.body, logoFile, photosFiles);
+            res.status(result.success ? 200 : 400).json(result);
+        } catch (err) {
+            console.error('Route error /api/hospitals/register:', err.message);
+            res.status(500).json({ success: false, error: 'Server error. Please try again.' });
+        }
+    }
+);
 // Add Speciality page
 app.get('/add-speciality', requireAuth('admin'), async (req, res) => {
     try {
@@ -1724,19 +1751,39 @@ app.get('/api/patient', authenticate, authorize('patient'), async (req, res) => 
 
 app.put('/api/patient', authenticate, authorize('patient'), async (req, res) => {
     try {
+        const { 
+            full_name, phone, address,
+            emergency_contact_name, emergency_contact_phone,
+            medical_conditions, allergies, blood_type, gender
+        } = req.body;
+
         const result = await query(
             `UPDATE patients
-             SET full_name = COALESCE($1, full_name),
-                 phone = COALESCE($2, phone),
-                 address = COALESCE($3, address),
-                 emergency_contact_name = COALESCE($4, emergency_contact_name),
-                 emergency_contact_phone = COALESCE($5, emergency_contact_phone)
-             WHERE user_id = $6 RETURNING *`,
-            [req.body.full_name, req.body.phone, req.body.address,
-             req.body.emergency_contact_name, req.body.emergency_contact_phone, req.user.id]
+             SET full_name                = COALESCE($1, full_name),
+                 phone                    = COALESCE($2, phone),
+                 address                  = COALESCE($3, address),
+                 emergency_contact_name   = COALESCE($4, emergency_contact_name),
+                 emergency_contact_phone  = COALESCE($5, emergency_contact_phone),
+                 medical_conditions       = COALESCE($6, medical_conditions),
+                 allergies                = COALESCE($7, allergies),
+                 blood_type               = COALESCE($8, blood_type),
+                 gender                   = COALESCE($9, gender)
+             WHERE user_id = $10
+             RETURNING *`,
+            [
+                full_name, phone, address,
+                emergency_contact_name, emergency_contact_phone,
+                medical_conditions, allergies, blood_type, gender,
+                req.user.id
+            ]
         );
+
+        if (!result.rows[0]) {
+            return res.status(404).json({ error: 'Patient not found' });
+        }
         res.json(result.rows[0]);
     } catch (error) {
+        console.error('Error updating patient:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -2556,7 +2603,7 @@ app.post('/api/doctor/profile/photo', authenticate, authorize('doctor'), upload.
         const doctorId = doctorRes.rows[0].doctor_id;
 
         // Ensure photos directory exists and move file there (multer may save to temp)
-        const photosDir = path.join(__dirname, 'uploads', 'photos');
+        const photosDir = path.join(UPLOADS_ROOT, 'photos');
         if (!fs.existsSync(photosDir)) fs.mkdirSync(photosDir, { recursive: true });
         const destPath = path.join(photosDir, req.file.filename);
         if (req.file.path !== destPath) fs.renameSync(req.file.path, destPath);
@@ -2617,29 +2664,57 @@ app.post('/api/doctor/video/schedule', authenticate, authorize('doctor'), async 
 // ============================================
 
 app.get('/api/hospital/data', authenticate, async (req, res) => {
-    try {
-        const adminResult = await query('SELECT hospital_id FROM hospital_admins WHERE user_id = $1', [req.user.id]);
-        const hospitalId = adminResult.rows[0]?.hospital_id;
-        if (!hospitalId) return res.status(404).json({ error: 'Hospital not found' });
-
-        const [hospitalResult, doctorsResult, medicinesResult, labsResult] = await Promise.all([
-            query('SELECT * FROM hospitals WHERE hospital_id = $1', [hospitalId]),
-            query('SELECT * FROM doctors WHERE hospital_id = $1', [hospitalId]),
-            query('SELECT * FROM medicines WHERE hospital_id = $1', [hospitalId]),
-            query('SELECT * FROM lab_technicians WHERE hospital_id = $1', [hospitalId])
-        ]);
-
-        res.json({
-            hospitalName: hospitalResult.rows[0]?.name || 'City General Hospital',
-            hospitalId: hospitalResult.rows[0]?.hospital_uuid || 'HOS-12345',
-            doctors: doctorsResult.rows,
-            medicines: medicinesResult.rows,
-            labs: labsResult.rows,
-            specialities: [...new Set(doctorsResult.rows.map(d => d.specialization).filter(Boolean))]
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+  try {
+    const adminResult = await query(
+      'SELECT hospital_id FROM hospital_admins WHERE user_id = $1',
+      [req.user.id]
+    );
+    
+    const hospitalId = adminResult.rows[0]?.hospital_id;
+    
+    if (!hospitalId) {
+      return res.status(404).json({ error: 'Hospital not found' });
     }
+    
+    const hospitalResult = await query('SELECT * FROM hospitals WHERE hospital_id = $1', [hospitalId]);
+    const doctorsResult = await query('SELECT * FROM doctors WHERE hospital_id = $1', [hospitalId]);
+    const medicinesResult = await query('SELECT * FROM medicines WHERE hospital_id = $1', [hospitalId]);
+    const labsResult = await query('SELECT * FROM lab_technicians WHERE hospital_id = $1', [hospitalId]);
+    
+    const hospital = hospitalResult.rows[0];
+    let logoUrl = null;
+    
+    // ✅ Generate logo URL if file exists
+    if (hospital?.logo_filename) {
+      logoUrl = `/uploads/hospitals/logos/${hospital.logo_filename}`;
+    }
+    
+    res.json({
+      hospitalName: hospital?.name || 'City General Hospital',
+      hospitalId: hospital?.hospital_uuid || 'HOS-12345',
+      logoUrl: logoUrl,
+      doctors: doctorsResult.rows,
+      medicines: medicinesResult.rows,
+      labs: labsResult.rows,
+      specialities: [...new Set(doctorsResult.rows.map(d => d.specialization).filter(Boolean))]
+    });
+  } catch (error) {
+    console.error('Error fetching hospital data:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+// Serve uploaded reports
+app.get('/uploads/reports/:file', (req, res) => {
+    const filePath = path.join(UPLOADS_ROOT, 'reports', req.params.file);
+    if (fs.existsSync(filePath)) res.sendFile(filePath);
+    else res.status(404).json({ error: 'File not found' });
+});
+
+// Serve hospital logos
+app.get('/uploads/hospitals/logos/:filename', (req, res) => {
+    const filePath = path.join(UPLOADS_ROOT, 'hospitals', 'logos', req.params.filename);
+    if (fs.existsSync(filePath)) res.sendFile(filePath);
+    else res.status(404).json({ error: 'Logo not found' });
 });
 
 
@@ -2923,6 +2998,80 @@ app.post('/api/feedback', async (req, res) => {
     }
 });
 
+// ------------ chat-room page route ---------------
+// app.get('/chat-room', requireAuth('doctor', 'patient'), async (req, res) => {
+//   Because requireAuth() only accepts a single role, use authenticate + manual check:
+ 
+app.get('/chat-room', authenticate, async (req, res) => {
+  try {
+    const { doctorId, patientId } = req.query;
+    if (!doctorId || !patientId) {
+      return res.status(400).send('<h2>Missing doctorId or patientId</h2>');
+    }
+ 
+    const userId = req.user.id;
+    const role   = req.user.role;
+ 
+    // Only the doctor or patient for this room may enter
+    if (role === 'doctor') {
+      const check = await query(
+        'SELECT doctor_id FROM doctors WHERE user_id = $1 AND doctor_id = $2',
+        [userId, doctorId]
+      );
+      if (!check.rows.length) return res.status(403).send('<h2>Forbidden</h2>');
+    } else if (role === 'patient') {
+      const check = await query(
+        'SELECT patient_id FROM patients WHERE user_id = $1 AND patient_id = $2',
+        [userId, patientId]
+      );
+      if (!check.rows.length) return res.status(403).send('<h2>Forbidden</h2>');
+    } else {
+      return res.status(403).send('<h2>Forbidden</h2>');
+    }
+ 
+    const [docRes, patRes] = await Promise.all([
+      query('SELECT full_name FROM doctors  WHERE doctor_id  = $1', [doctorId]),
+      query('SELECT full_name FROM patients WHERE patient_id = $1', [patientId])
+    ]);
+ 
+    const doctorName      = docRes.rows[0]?.full_name || 'Doctor';
+    const patientName     = patRes.rows[0]?.full_name || 'Patient';
+    const currentUserName = role === 'doctor' ? doctorName : patientName;
+ 
+    res.setHeader('Content-Type', 'text/html');
+    res.send(generateChatRoomHTML({
+      doctorId, patientId, doctorName, patientName,
+      currentUserId:   userId,
+      currentUserRole: role,
+      currentUserName
+    }));
+ 
+  } catch (err) {
+    console.error('[/chat-room]', err);
+    res.status(500).send('<h2>Error</h2><p>' + err.message + '</p>');
+  }
+});
+
+app.get('/api/chat/messages', authenticate, async (req, res) => {
+  try {
+    const { doctorId, patientId, limit = 50 } = req.query;
+    if (!doctorId || !patientId) return res.status(400).json({ error: 'Missing params' });
+    const roomId = [doctorId, patientId].sort().join('_');
+    const result = await query(
+      `SELECT m.*, u.username AS sender_name
+         FROM chat_messages m
+         JOIN users u ON m.sender_id = u.user_id
+        WHERE m.room_id = $1
+        ORDER BY m.created_at DESC LIMIT $2`,
+      [roomId, parseInt(limit)]
+    );
+    res.json(result.rows.reverse());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ============================================
 // MOCK SDK ROUTES
 // ============================================
@@ -2962,6 +3111,26 @@ app.get('/doctor-dashboard', requireAuth('doctor'), async (req, res) => {
     try { res.setHeader('Content-Type','text/html'); res.send(await require('./Doctor.js')(req.user.id)); }
     catch (err) { console.error(err); res.status(500).send('<h1>500 - Doctor Dashboard Error</h1><a href="/signin">← Sign In</a>'); }
 });
+app.get('/api/chat/messages', authenticate, async (req, res) => {
+    try {
+      const { doctorId, patientId, limit = 50 } = req.query;
+      if (!doctorId || !patientId) return res.status(400).json({ error: 'Missing params' });
+ 
+      const roomId = [doctorId, patientId].sort().join('_');
+      const result = await query(
+        `SELECT m.*, u.username as sender_name
+         FROM chat_messages m
+         JOIN users u ON m.sender_id = u.user_id
+         WHERE m.room_id = $1
+         ORDER BY m.created_at DESC
+         LIMIT $2`,
+        [roomId, parseInt(limit)]
+      );
+      res.json(result.rows.reverse());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
 app.get('/admin-dashboard', requireAuth('admin'), async (req, res) => {
     try { res.setHeader('Content-Type','text/html'); res.send(await require('./admin.js')(req.user.id)); }
@@ -3421,10 +3590,15 @@ function generateHTML() {
 </html>`;
 }
 
+
 // ============================================
 // START SERVER
 // ============================================
-app.listen(PORT, () => {
-    console.log(`   Home:             http://localhost:${PORT}/`);
+const server = http.createServer(app);
+chatServer.attach(server);                    // attaches Socket.IO
+ 
+server.listen(PORT, () => {
+    console.log(`   Home:    http://localhost:${PORT}/`);
+    console.log(`   Chat WS: ws://localhost:${PORT}/socket.io`);
     console.log(`   Press Ctrl+C to stop`);
 });
