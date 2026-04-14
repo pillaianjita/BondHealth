@@ -198,8 +198,8 @@ const path = require('path');
 // HTML Template Functions
 function getMainDashboardHTML(hospitalData = null, doctors = [], medicines = [], labs = []) {
     const currentHospitalData = {
-        hospitalName: hospitalData?.name || 'City General Hospital',
-        hospitalId: hospitalData?.hospital_uuid || 'HOS-12345',
+        hospitalName: hospitalData?.name || hospitalData?.hospital_name || 'City General Hospital',
+        hospitalId: hospitalData?.hospital_uuid || hospitalData?.hospital_id || 'HOS-12345',
         logoFilename: hospitalData?.logo_filename || '',
         mainPhotoFilename: hospitalData?.main_photo_filename || '',
         stats: {

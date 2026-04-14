@@ -3043,10 +3043,10 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
             <div class="mt-6 white-card rounded-xl p-4 border border-cyan-100">
               <div class="flex items-center justify-between mb-3">
                 <h3 class="text-base font-semibold cyan-text">Order History</h3>
-                <span class="text-xs px-2 py-1 rounded-full cyan-dark text-white">${orders.length} orders</span>
+                <span class="text-xs px-2 py-1 rounded-full cyan-dark text-white">\${(orders || []).length} orders</span>
               </div>
               <div class="space-y-3">
-                ${orderHistoryHtml}
+                \${orderHistoryHtml}
               </div>
             </div>
           \`;
