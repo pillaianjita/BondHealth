@@ -340,6 +340,14 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
         <div>
           <h1 class="text-3xl font-bold cyan-text" id="headerDoctorName">${esc(doctorData.name)}</h1>
           <p class="text-gray-600" id="headerDoctorMeta">${esc(doctorData.designation)} • ${esc(doctorData.specialization)}</p>
+          ${doctorData.hospital_photo_url
+            ? `<div class="mt-1 flex items-center gap-2 text-xs text-gray-500">
+                 <span class="w-5 h-5 rounded-full overflow-hidden inline-flex border border-cyan-200">
+                   <img src="${esc(doctorData.hospital_photo_url)}" alt="Hospital" class="w-full h-full object-cover">
+                 </span>
+                 <span>${esc(doctorData.hospital_name || 'Hospital')}</span>
+               </div>`
+            : ''}
           <p class="text-sm cyan-text">ID: ${esc(doctorData.doctor_uuid)}</p>
         </div>
       </div>
@@ -1495,7 +1503,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const el = document.getElementById('chatMessages');
       const linkifyMessage = (txt) => {
         const safe = escHTML(txt);
-        return safe.replace(/(\/chat-room\?[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" class="underline text-cyan-700">$1</a>');
+        return safe
+          .split(' ')
+          .map(part => {
+            if (part.startsWith('/chat-room?')) {
+              return '<a href="' + part + '" target="_blank" rel="noopener noreferrer" class="underline text-cyan-700">Join consultation room</a>';
+            }
+            return part;
+          })
+          .join(' ');
       };
       el.innerHTML = msgs.map(m => \`<div class="\${m.sender==='doctor'?'chat-msg-dr':'chat-msg-pt'}"><span>\${linkifyMessage(m.message)}</span></div>\`).join('');
       el.scrollTop = el.scrollHeight;
@@ -1909,8 +1925,27 @@ module.exports = async function renderDoctorDashboard(userId) {
     console.log('🔍 renderDoctorDashboard for user:', userId);
 
     const doctorResult = await query(
-      `SELECT d.*, u.email
+      `SELECT d.*,
+              COALESCE(d.photo_url, dp.file_url) AS photo_url,
+              u.email,
+              h.logo_filename,
+              h.main_photo_filename,
+              CASE
+                WHEN h.main_photo_filename IS NOT NULL AND h.main_photo_filename <> ''
+                THEN '/uploads/hospitals/photos/' || h.main_photo_filename
+                WHEN h.logo_filename IS NOT NULL AND h.logo_filename <> ''
+                THEN '/uploads/hospitals/logos/' || h.logo_filename
+                ELSE NULL
+              END AS hospital_photo_url
        FROM doctors d
+       LEFT JOIN LATERAL (
+         SELECT file_url
+         FROM doctor_documents
+         WHERE doctor_id = d.doctor_id AND document_type = 'profile_photo'
+         ORDER BY uploaded_at DESC
+         LIMIT 1
+       ) dp ON true
+       LEFT JOIN hospitals h ON d.hospital_id = h.hospital_id
        JOIN users u ON d.user_id = u.user_id
        WHERE d.user_id = $1`,
       [userId]

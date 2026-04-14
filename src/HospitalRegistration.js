@@ -928,7 +928,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
                         <div class="col-md-6 mb-4">
                             <label for="officialEmail" class="form-label required">Official Email</label>
-                            <input type="text" class="form-control" id="officialEmail" placeholder="hospital@example.com" autocomplete="off">
+                            <input type="email" class="form-control" id="officialEmail" placeholder="hospital@example.com" autocomplete="off" inputmode="email" autocapitalize="none" spellcheck="false">
                             <div class="invalid-feedback" id="officialEmailError">Please enter a valid email address.</div>
                         </div>
                     </div>
@@ -954,7 +954,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 
                     <div class="mb-4">
                         <label for="adminEmail" class="form-label required">Admin Email</label>
-                        <input type="text" class="form-control" id="adminEmail" placeholder="admin@example.com" autocomplete="off">
+                        <input type="email" class="form-control" id="adminEmail" placeholder="admin@example.com" autocomplete="off" inputmode="email" autocapitalize="none" spellcheck="false">
                         <div class="invalid-feedback" id="adminEmailError">Please enter a valid email address.</div>
                     </div>
 
@@ -1127,7 +1127,24 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             setupFileUploads();
             setupLogoUpload();
             setupFormSubmission();
+            setupEmailValidationUX();
         });
+
+        function setupEmailValidationUX() {
+            const bindEmailInput = (fieldId, errorId) => {
+                const input = document.getElementById(fieldId);
+                if (!input) return;
+                input.addEventListener('input', () => clearError(errorId));
+                input.addEventListener('blur', () => {
+                    input.value = sanitizeEmail(input.value);
+                    if (input.value && !isValidEmail(input.value)) {
+                        showError(errorId, 'Please enter a valid email address.');
+                    }
+                });
+            };
+            bindEmailInput('officialEmail', 'officialEmailError');
+            bindEmailInput('adminEmail', 'adminEmailError');
+        }
 
         // ─────────────────────────────────────────
         // ✅ FIX #4: Password strength checker
@@ -1298,7 +1315,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
             });
 
             logoUploadArea.addEventListener('click', function (e) {
-                if (e.target !== logoInput) logoInput.click();
+                const interactiveTarget = e.target.closest('label, input, button, a');
+                if (interactiveTarget) return;
+                logoInput.click();
             });
         }
 
@@ -1381,7 +1400,9 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 });
 
                 area.addEventListener('click', function (e) {
-                    if (e.target !== input) input.click();
+                    const interactiveTarget = e.target.closest('label, input, button, a');
+                    if (interactiveTarget) return;
+                    input.click();
                 });
             });
         }
@@ -1405,10 +1426,11 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                 try {
                     // Build FormData to include files
                     const formDataObj = new FormData();
+                    const formData = getFormData();
 
                     // Add all text fields
-                    Object.keys(getFormData()).forEach(key => {
-                        const value = getFormData()[key];
+                    Object.keys(formData).forEach(key => {
+                        const value = formData[key];
                         if (typeof value === 'string') {
                             formDataObj.append(key, value);
                         } else if (Array.isArray(value)) {
@@ -1463,8 +1485,10 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
                         method: 'POST',
                         body: formDataObj  // ✅ Changed: use FormData instead of JSON
                     });
-
-                    const result = await response.json();
+                    const contentType = response.headers.get('content-type') || '';
+                    const result = contentType.includes('application/json')
+                        ? await response.json()
+                        : { success: false, error: (await response.text()).slice(0, 200) || 'Non-JSON server response' };
 
                     if (!response.ok || !result.success) {
                         throw new Error(result.error || 'Registration failed. Please try again.');
@@ -1488,6 +1512,13 @@ successMessage.style.display = 'block';
 
                 } catch (error) {
                     console.error('Registration error:', error);
+                    const msg = String(error?.message || '').toLowerCase();
+                    if (msg.includes('email') && msg.includes('already')) {
+                        showError('adminEmailError', 'This email is already registered. Use another email.');
+                        const adminEmailField = document.getElementById('adminEmail');
+                        adminEmailField?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        adminEmailField?.focus();
+                    }
                     alert('Registration failed: ' + error.message);
                 } finally {
                     submitBtn.innerHTML = originalHTML;
@@ -1566,6 +1597,30 @@ successMessage.style.display = 'block';
         function validateForm() {
             let isValid = true;
             clearAllErrors();
+            const errorFieldMap = {
+                hospTypeError: 'typeGovt',
+                departmentsError: 'departmentsContainer',
+                hospitalMainPhotoError: 'hospitalMainPhotoArea',
+                adminPhotoError: 'adminPhotoArea',
+                regCertificateError: 'regCertificateArea',
+                hospitalLicenseError: 'hospitalLicenseArea',
+                tradeLicenseError: 'tradeLicenseArea',
+                panCardError: 'panCardArea'
+            };
+
+            const focusFirstError = () => {
+                const firstError = document.querySelector('.invalid-feedback.show');
+                if (!firstError) return;
+                const mappedFieldId = errorFieldMap[firstError.id];
+                const target = mappedFieldId
+                    ? document.getElementById(mappedFieldId)
+                    : document.getElementById(firstError.id.replace('Error', ''));
+                if (!target) return;
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (typeof target.focus === 'function') {
+                    setTimeout(() => target.focus({ preventScroll: true }), 150);
+                }
+            };
 
             // Hospital Name
             if (!document.getElementById('hospName').value.trim()) {
@@ -1602,7 +1657,9 @@ successMessage.style.display = 'block';
             }
 
             // Official Email
-            const officialEmail = document.getElementById('officialEmail').value.trim();
+            const officialEmailInput = document.getElementById('officialEmail');
+            const officialEmail = sanitizeEmail(officialEmailInput.value);
+            officialEmailInput.value = officialEmail;
             if (!officialEmail) {
                 showError('officialEmailError', 'Please enter official email.');
                 isValid = false;
@@ -1624,7 +1681,9 @@ successMessage.style.display = 'block';
             }
 
             // Admin Email
-            const adminEmail = document.getElementById('adminEmail').value.trim();
+            const adminEmailInput = document.getElementById('adminEmail');
+            const adminEmail = sanitizeEmail(adminEmailInput.value);
+            adminEmailInput.value = adminEmail;
             if (!adminEmail) {
                 showError('adminEmailError', 'Please enter admin email.');
                 isValid = false;
@@ -1682,6 +1741,9 @@ successMessage.style.display = 'block';
                 }
             });
 
+            if (!isValid) {
+                focusFirstError();
+            }
             return isValid;
         }
 
@@ -1748,7 +1810,17 @@ successMessage.style.display = 'block';
         }
 
         function isValidEmail(email) {
-            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+            const normalized = sanitizeEmail(email);
+            if (!normalized) return false;
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
+        }
+
+        function sanitizeEmail(value) {
+            return String(value || '')
+                .normalize('NFKC')
+                .replace(/[\u200B-\u200D\uFEFF]/g, '')
+                .trim()
+                .toLowerCase();
         }
     </script>
 </body>
@@ -1781,7 +1853,41 @@ async function handleHospitalRegistration(reqBody, logoFile, mainPhotoFile, phot
             documents 
         } = reqBody;
 
+        const parseJsonArray = (value) => {
+            if (Array.isArray(value)) return value;
+            if (value === null || value === undefined || value === '') return [];
+            try {
+                const parsed = JSON.parse(value);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (_) {
+                return [];
+            }
+        };
+
+        const parseJsonObject = (value) => {
+            if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+            if (!value) return {};
+            try {
+                const parsed = JSON.parse(value);
+                return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+            } catch (_) {
+                return {};
+            }
+        };
+
+        const departmentsArr = parseJsonArray(departments);
+        const facultyServicesArr = parseJsonArray(facultyServices);
+        const documentsObj = parseJsonObject(documents);
+
         await client.query(`ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS main_photo_filename VARCHAR(255)`);
+        await client.query(`ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS logo_filename VARCHAR(255)`);
+        await client.query(`ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS photo_filenames TEXT[]`);
+        await client.query(`ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS departments TEXT[]`);
+        await client.query(`ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS faculty_services TEXT[]`);
+        await client.query(`ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS doc_reg_certificate TEXT`);
+        await client.query(`ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS doc_hospital_license TEXT`);
+        await client.query(`ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS doc_trade_license TEXT`);
+        await client.query(`ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS doc_pan_card TEXT`);
         await client.query(`ALTER TABLE hospital_admins ADD COLUMN IF NOT EXISTS photo_url TEXT`);
 
         // ✅ SAVE HOSPITAL LOGO TO DISK
@@ -1842,7 +1948,24 @@ async function handleHospitalRegistration(reqBody, logoFile, mainPhotoFile, phot
             `INSERT INTO hospitals (hospital_uuid, name, type, registration_number, city, phone, email, departments, faculty_services, logo_filename, main_photo_filename, photo_filenames, doc_reg_certificate, doc_hospital_license, doc_trade_license, doc_pan_card)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             RETURNING hospital_id, hospital_uuid`,
-            ['HOSP-' + Date.now(), hospitalName, hospitalType, registrationNumber || null, city, contactNo || null, officialEmail, departments || [], facultyServices || [], logoFilename, mainPhotoFilename, photoFilenames, documents?.regCertificate || null, documents?.hospitalLicense || null, documents?.tradeLicense || null, documents?.panCard || null]
+            [
+                'HOSP-' + Date.now(),
+                hospitalName,
+                hospitalType,
+                registrationNumber || null,
+                city,
+                contactNo || null,
+                officialEmail,
+                departmentsArr,
+                facultyServicesArr,
+                logoFilename,
+                mainPhotoFilename,
+                photoFilenames,
+                documentsObj.regCertificate || null,
+                documentsObj.hospitalLicense || null,
+                documentsObj.tradeLicense || null,
+                documentsObj.panCard || null
+            ]
         );
 
         const hospitalId = hospitalResult.rows[0].hospital_id;

@@ -81,6 +81,20 @@ const SIGNIN_TEMPLATE = `<!doctype html>
     .patient-signup-text { font-size: 14px; color: #666; }
     .patient-signup-btn { background: none; border: none; color: #00d4ff; font-weight: 700; cursor: pointer; font-size: 14px; text-decoration: underline; padding: 0 5px; }
     .patient-signup-btn:hover { color: #0099cc; }
+    .fp-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.45); z-index: 1000; padding: 20px; }
+    .fp-modal.show { display: flex; }
+    .fp-card { width: 100%; max-width: 420px; background: #fff; border-radius: 12px; padding: 22px; box-shadow: 0 16px 40px rgba(0,0,0,0.2); }
+    .fp-title { font-size: 20px; font-weight: 700; color: #1a1a1a; margin-bottom: 6px; }
+    .fp-sub { font-size: 13px; color: #666; margin-bottom: 16px; }
+    .fp-row { margin-bottom: 12px; }
+    .fp-actions { display: flex; gap: 10px; margin-top: 14px; }
+    .fp-btn { border: none; border-radius: 8px; padding: 10px 12px; font-size: 13px; font-weight: 700; cursor: pointer; flex: 1; }
+    .fp-btn.primary { background: linear-gradient(135deg,#00d4ff,#0099cc); color: #fff; }
+    .fp-btn.ghost { background: #edf2f7; color: #334155; }
+    .fp-link-btn { border: none; background: transparent; color: #00a6d1; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0; }
+    .fp-status { font-size: 12px; margin-top: 8px; min-height: 18px; }
+    .fp-status.error { color: #dc2626; }
+    .fp-status.success { color: #16a34a; }
   </style>
 </head>
 <body>
@@ -171,6 +185,42 @@ const SIGNIN_TEMPLATE = `<!doctype html>
     <div class="particle particle-3"></div><div class="particle particle-4"></div>
     <div class="particle particle-5"></div><div class="particle particle-6"></div>
     <div class="particle particle-7"></div><div class="particle particle-8"></div>
+  </div>
+
+  <div class="fp-modal" id="forgotPasswordModal">
+    <div class="fp-card" id="forgotPasswordCard">
+      <div class="fp-title">Reset Password</div>
+      <div class="fp-sub">Enter your email, username, or phone. We will send an OTP to your registered email or phone.</div>
+      <div class="fp-row" id="fpLoginRow">
+        <input type="text" class="form-input" id="fpLoginId" placeholder="Email, username, or phone">
+      </div>
+      <div class="fp-row" id="fpOtpRow" style="display:none;">
+        <input type="text" class="form-input" id="fpOtp" placeholder="Enter OTP (6 digits)">
+      </div>
+      <div class="fp-row" id="fpNewPasswordRow" style="display:none;">
+        <input type="password" class="form-input" id="fpNewPassword" placeholder="New password (min 8 chars)">
+      </div>
+      <div class="fp-row" id="fpConfirmPasswordRow" style="display:none;">
+        <input type="password" class="form-input" id="fpConfirmPassword" placeholder="Confirm new password">
+      </div>
+      <div class="fp-actions">
+        <button class="fp-btn ghost" id="fpCloseBtn" type="button">Close</button>
+        <button class="fp-btn primary" id="fpResetBtn" type="button" style="display:none;">Reset Password</button>
+      </div>
+      <div class="fp-actions" id="fpSendRow">
+        <button class="fp-btn ghost" id="fpSendOtpBtn" type="button">Send OTP</button>
+      </div>
+      <div class="fp-actions" id="fpVerifyRow" style="display:none;">
+        <button class="fp-btn ghost" id="fpVerifyOtpBtn" type="button">Verify OTP</button>
+      </div>
+      <div id="fpResendRow" style="margin-top:10px; display:none; justify-content:space-between; align-items:center;">
+        <button class="fp-link-btn" id="fpResendOtpBtn" type="button">Resend OTP</button>
+        <span id="fpStatus" class="fp-status"></span>
+      </div>
+      <div id="fpStatusOnly" style="margin-top:10px; display:flex; justify-content:flex-end; align-items:center;">
+        <span class="fp-status"></span>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -288,9 +338,150 @@ const SIGNIN_TEMPLATE = `<!doctype html>
       }
     }
 
-    // ── Forgot password ────────────────────────────
-    document.getElementById('forgotPwLink').addEventListener('click', e => { e.preventDefault(); showMessage('Password reset link sent to your registered email!', 'success'); });
-    document.getElementById('forgotPwLinkHospital').addEventListener('click', e => { e.preventDefault(); showMessage('Password reset link sent to your hospital email!', 'success'); });
+    // ── Forgot password (OTP + resend + reset) ─────
+    const fpModal = document.getElementById('forgotPasswordModal');
+    const fpStatus = document.getElementById('fpStatus');
+    const fpLoginId = document.getElementById('fpLoginId');
+    const fpOtp = document.getElementById('fpOtp');
+    const fpNewPassword = document.getElementById('fpNewPassword');
+    const fpConfirmPassword = document.getElementById('fpConfirmPassword');
+    const forgotPasswordCard = document.getElementById('forgotPasswordCard');
+    const fpOtpRow = document.getElementById('fpOtpRow');
+    const fpNewPasswordRow = document.getElementById('fpNewPasswordRow');
+    const fpConfirmPasswordRow = document.getElementById('fpConfirmPasswordRow');
+    const fpSendRow = document.getElementById('fpSendRow');
+    const fpVerifyRow = document.getElementById('fpVerifyRow');
+    const fpResendRow = document.getElementById('fpResendRow');
+    const fpResetBtn = document.getElementById('fpResetBtn');
+    let fpBackdropMouseDown = false;
+    let fpStep = 'request';
+
+    function setFpStatus(msg, type) {
+      fpStatus.textContent = msg || '';
+      fpStatus.className = 'fp-status ' + (type || '');
+    }
+
+    function openForgotModal(prefill = '') {
+      fpModal.classList.add('show');
+      fpLoginId.value = prefill || '';
+      fpOtp.value = '';
+      fpNewPassword.value = '';
+      fpConfirmPassword.value = '';
+      fpStep = 'request';
+      fpOtpRow.style.display = 'none';
+      fpNewPasswordRow.style.display = 'none';
+      fpConfirmPasswordRow.style.display = 'none';
+      fpSendRow.style.display = 'flex';
+      fpVerifyRow.style.display = 'none';
+      fpResendRow.style.display = 'none';
+      fpResetBtn.style.display = 'none';
+      setFpStatus('', '');
+    }
+
+    function closeForgotModal() {
+      fpModal.classList.remove('show');
+    }
+
+    async function fpPost(url, payload) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.message || data.error || 'Request failed');
+      return data;
+    }
+
+    document.getElementById('forgotPwLink').addEventListener('click', e => {
+      e.preventDefault();
+      openForgotModal(document.getElementById('patientUsername').value.trim());
+    });
+    document.getElementById('forgotPwLinkHospital').addEventListener('click', e => {
+      e.preventDefault();
+      openForgotModal(document.getElementById('hospitalUsername').value.trim());
+    });
+
+    document.getElementById('fpCloseBtn').addEventListener('click', closeForgotModal);
+    forgotPasswordCard.addEventListener('mousedown', e => e.stopPropagation());
+    forgotPasswordCard.addEventListener('click', e => e.stopPropagation());
+    fpModal.addEventListener('mousedown', e => {
+      fpBackdropMouseDown = (e.target === fpModal);
+    });
+    fpModal.addEventListener('click', e => {
+      if (e.target === fpModal && fpBackdropMouseDown) closeForgotModal();
+      fpBackdropMouseDown = false;
+    });
+
+    document.getElementById('fpSendOtpBtn').addEventListener('click', async () => {
+      const loginId = fpLoginId.value.trim();
+      if (!loginId) { setFpStatus('Enter email, username, or phone first', 'error'); return; }
+      setFpStatus('Sending OTP...', '');
+      try {
+        const data = await fpPost('/api/auth/forgot-password/request', { loginId });
+        const devOtpHint = data?.dev_otp ? (' OTP (dev mode): ' + data.dev_otp) : '';
+        setFpStatus((data?.message || 'OTP sent to your registered email') + devOtpHint, 'success');
+        fpStep = 'otp';
+        fpOtpRow.style.display = 'block';
+        fpVerifyRow.style.display = 'flex';
+        fpResendRow.style.display = 'flex';
+        fpLoginId.disabled = true;
+        document.getElementById('fpSendOtpBtn').disabled = true;
+      } catch (err) {
+        setFpStatus(err.message, 'error');
+      }
+    });
+
+    document.getElementById('fpResendOtpBtn').addEventListener('click', async () => {
+      const loginId = fpLoginId.value.trim();
+      if (!loginId) { setFpStatus('Enter email, username, or phone first', 'error'); return; }
+      setFpStatus('Resending OTP...', '');
+      try {
+        const data = await fpPost('/api/auth/forgot-password/resend', { loginId });
+        const devOtpHint = data?.dev_otp ? (' OTP (dev mode): ' + data.dev_otp) : '';
+        setFpStatus((data?.message || 'OTP resent successfully') + devOtpHint, 'success');
+      } catch (err) {
+        setFpStatus(err.message, 'error');
+      }
+    });
+
+    document.getElementById('fpVerifyOtpBtn').addEventListener('click', async () => {
+      const loginId = fpLoginId.value.trim();
+      const otp = fpOtp.value.trim();
+      if (!loginId || !otp) { setFpStatus('Enter login and OTP', 'error'); return; }
+      setFpStatus('Verifying OTP...', '');
+      try {
+        await fpPost('/api/auth/forgot-password/verify', { loginId, otp });
+        setFpStatus('OTP verified. You can now reset password.', 'success');
+        fpStep = 'reset';
+        fpOtp.disabled = true;
+        document.getElementById('fpVerifyOtpBtn').disabled = true;
+        fpNewPasswordRow.style.display = 'block';
+        fpConfirmPasswordRow.style.display = 'block';
+        fpResetBtn.style.display = 'block';
+      } catch (err) {
+        setFpStatus(err.message, 'error');
+      }
+    });
+
+    document.getElementById('fpResetBtn').addEventListener('click', async () => {
+      const loginId = fpLoginId.value.trim();
+      const otp = fpOtp.value.trim();
+      const newPassword = fpNewPassword.value;
+      const confirmPassword = fpConfirmPassword.value;
+      if (!loginId || !otp || !newPassword || !confirmPassword) {
+        setFpStatus('Fill all fields', 'error'); return;
+      }
+      setFpStatus('Resetting password...', '');
+      try {
+        await fpPost('/api/auth/forgot-password/reset', { loginId, otp, newPassword, confirmPassword });
+        setFpStatus('Password reset successful. Please sign in.', 'success');
+        showMessage('Password reset successful. Please sign in with new password.', 'success');
+        setTimeout(closeForgotModal, 900);
+      } catch (err) {
+        setFpStatus(err.message, 'error');
+      }
+    });
   </script>
 </body>
 </html>`;

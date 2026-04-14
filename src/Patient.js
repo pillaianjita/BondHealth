@@ -416,6 +416,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
       <title>BondHealth - Patient Portal</title>
       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
       <script src="https://cdn.tailwindcss.com"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
         
@@ -600,6 +601,29 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
           width: 4px;
           background: linear-gradient(180deg, #06b6d4, #0ea5e9);
           opacity: 0.65;
+        }
+
+        body.dark-mode {
+          background: linear-gradient(135deg, #0b1220 0%, #111827 100%);
+          color: #e5e7eb;
+        }
+        body.dark-mode .white-card,
+        body.dark-mode .bg-white {
+          background: #111827 !important;
+          color: #e5e7eb !important;
+          border-color: #1f2937 !important;
+        }
+        body.dark-mode .cyan-light {
+          background: rgba(34, 211, 238, 0.08) !important;
+        }
+        body.dark-mode .text-gray-500,
+        body.dark-mode .text-gray-600,
+        body.dark-mode .text-gray-700 {
+          color: #cbd5e1 !important;
+        }
+        body.reduce-motion * {
+          animation: none !important;
+          transition: none !important;
         }
         
         .menu-item {
@@ -1495,6 +1519,32 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
           <span class="text-sm font-medium" id="successToastMessage">Appointment booked successfully!</span>
         </div>
       </div>
+
+      <div id="settingsModal" class="fixed inset-0 modal-overlay z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-md animate-slide-up">
+          <div class="p-6">
+            <div class="flex justify-between items-center mb-5">
+              <h3 class="text-xl font-bold cyan-text">Settings</h3>
+              <button id="closeSettingsModal" class="p-2 hover:bg-gray-100 rounded-full transition">
+                <i class="fas fa-times text-gray-500"></i>
+              </button>
+            </div>
+            <div class="space-y-4">
+              <label class="flex items-center justify-between p-3 rounded-xl border border-gray-200">
+                <span class="text-sm font-medium cyan-text">Dark Mode</span>
+                <input type="checkbox" id="darkModeToggle" class="h-4 w-4">
+              </label>
+              <label class="flex items-center justify-between p-3 rounded-xl border border-gray-200">
+                <span class="text-sm font-medium cyan-text">Reduce Animations</span>
+                <input type="checkbox" id="reduceMotionToggle" class="h-4 w-4">
+              </label>
+            </div>
+            <div class="mt-5 flex justify-end">
+              <button id="saveSettingsBtn" class="px-5 py-2.5 btn-cyan rounded-lg">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
       
       <div id="toast" class="fixed bottom-4 right-4 white-card rounded-lg p-3 max-w-sm hidden z-50">
         <div class="flex items-center">
@@ -1513,6 +1563,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         let selectedTime = '';
         let selectedVisitMode = 'in-person';
         let hospitalVisitPolicy = 'both';
+        let patientUiSettings = { darkMode: false, reduceMotion: false };
         let currentFilter = 'all';
         let searchQuery = '';
         
@@ -1522,6 +1573,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         let rescheduleTime = '';
         
         let selectedFile = null;
+        let cachedDoctors = [];
         
         const reportsData = ${JSON.stringify(reports)};
         const chatDoctorsData = ${JSON.stringify(chatDoctors)};
@@ -1596,7 +1648,36 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
           return report.file_view_url || report.file_url || getReportDownloadUrl(report);
         }
 
+        function applyUiSettings(settings) {
+          const safeSettings = {
+            darkMode: !!settings?.darkMode,
+            reduceMotion: !!settings?.reduceMotion
+          };
+          patientUiSettings = safeSettings;
+          document.body.classList.toggle('dark-mode', safeSettings.darkMode);
+          document.body.classList.toggle('reduce-motion', safeSettings.reduceMotion);
+        }
+
+        function loadUiSettings() {
+          try {
+            const raw = localStorage.getItem('bondhealth_patient_ui_settings');
+            if (raw) {
+              applyUiSettings(JSON.parse(raw));
+              return;
+            }
+          } catch (err) {
+            console.warn('Unable to parse UI settings:', err);
+          }
+          applyUiSettings({ darkMode: false, reduceMotion: false });
+        }
+
+        function persistUiSettings(settings) {
+          applyUiSettings(settings);
+          localStorage.setItem('bondhealth_patient_ui_settings', JSON.stringify(patientUiSettings));
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
+          loadUiSettings();
           const menuItems = document.querySelectorAll('.menu-item');
           const contentSections = {
             appointments: document.getElementById('appointmentsContent'),
@@ -1641,6 +1722,39 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
           const profileModal = document.getElementById('profileModal');
           const profileBtn = document.getElementById('profileBtn');
           const closeModalBtns = document.querySelectorAll('#closeModal, #closeModalBtn');
+          const settingsModal = document.getElementById('settingsModal');
+          const darkModeToggle = document.getElementById('darkModeToggle');
+          const reduceMotionToggle = document.getElementById('reduceMotionToggle');
+          const closeSettingsModalBtn = document.getElementById('closeSettingsModal');
+          const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+
+          const openSettingsModal = () => {
+            darkModeToggle.checked = !!patientUiSettings.darkMode;
+            reduceMotionToggle.checked = !!patientUiSettings.reduceMotion;
+            settingsModal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+          };
+          window.openPatientSettingsModal = openSettingsModal;
+
+          const closeSettingsModal = () => {
+            settingsModal.classList.add('hidden');
+            document.body.style.overflow = '';
+          };
+
+          closeSettingsModalBtn?.addEventListener('click', closeSettingsModal);
+          saveSettingsBtn?.addEventListener('click', () => {
+            persistUiSettings({
+              darkMode: darkModeToggle.checked,
+              reduceMotion: reduceMotionToggle.checked
+            });
+            closeSettingsModal();
+            showToast('Settings', 'Preferences saved successfully.', 'success');
+          });
+          settingsModal?.addEventListener('click', (e) => {
+            if (e.target === settingsModal) {
+              closeSettingsModal();
+            }
+          });
           
           profileBtn.addEventListener('click', () => {
             profileModal.classList.remove('hidden');
@@ -2107,37 +2221,123 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
           });
         });
         
+        async function downloadMedicalRecordsPdf() {
+          const { jsPDF } = window.jspdf || {};
+          if (!jsPDF) {
+            throw new Error('PDF library failed to load');
+          }
+
+          const [appointmentsRes, reportsRes, prescriptionsRes] = await Promise.all([
+            fetch('/api/appointments'),
+            fetch('/api/reports'),
+            fetch('/api/prescriptions')
+          ]);
+          const appointments = appointmentsRes.ok ? await appointmentsRes.json() : [];
+          const reports = reportsRes.ok ? await reportsRes.json() : [];
+          const prescriptions = prescriptionsRes.ok ? await prescriptionsRes.json() : [];
+
+          const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+          const pageWidth = doc.internal.pageSize.getWidth();
+          const pageHeight = doc.internal.pageSize.getHeight();
+          const margin = 40;
+          const lineHeight = 16;
+          let y = 60;
+
+          const addLine = (text, opts = {}) => {
+            const size = opts.size || 11;
+            const weight = opts.bold ? 'bold' : 'normal';
+            doc.setFont('helvetica', weight);
+            doc.setFontSize(size);
+            const lines = doc.splitTextToSize(String(text ?? ''), pageWidth - margin * 2);
+            lines.forEach((line) => {
+              if (y > pageHeight - 50) {
+                doc.addPage();
+                y = 50;
+              }
+              doc.text(line, margin, y);
+              y += lineHeight;
+            });
+          };
+
+          const safeDate = (value) => {
+            const d = new Date(value);
+            return Number.isNaN(d.getTime()) ? 'N/A' : d.toLocaleString();
+          };
+
+          addLine('BondHealth - Patient Medical Summary', { bold: true, size: 16 });
+          addLine('Generated: ' + new Date().toLocaleString());
+          addLine(' ');
+
+          addLine('Appointments (' + (Array.isArray(appointments) ? appointments.length : 0) + ')', { bold: true, size: 13 });
+          if (!Array.isArray(appointments) || appointments.length === 0) {
+            addLine('- No appointments found.');
+          } else {
+            appointments.forEach((apt, idx) => {
+              addLine((idx + 1) + '. ' + (apt.doctor_name || apt.doctor || 'Doctor not set') + ' | ' + safeDate(apt.appointment_date || apt.date) + ' | ' + (apt.status || 'N/A') + ' | ' + (apt.type || 'in-person'));
+            });
+          }
+          addLine(' ');
+
+          addLine('Lab Reports (' + (Array.isArray(reports) ? reports.length : 0) + ')', { bold: true, size: 13 });
+          if (!Array.isArray(reports) || reports.length === 0) {
+            addLine('- No reports found.');
+          } else {
+            reports.forEach((rep, idx) => {
+              addLine((idx + 1) + '. ' + (rep.test_type || rep.name || 'Report') + ' | ' + safeDate(rep.test_date || rep.created_at) + ' | ' + (rep.status || 'N/A'));
+              if (rep.findings) addLine('   Findings: ' + rep.findings);
+            });
+          }
+          addLine(' ');
+
+          addLine('Prescriptions (' + (Array.isArray(prescriptions) ? prescriptions.length : 0) + ')', { bold: true, size: 13 });
+          if (!Array.isArray(prescriptions) || prescriptions.length === 0) {
+            addLine('- No prescriptions found.');
+          } else {
+            prescriptions.forEach((rx, idx) => {
+              addLine((idx + 1) + '. ' + (rx.medicine_name || rx.medicine || 'Medication') + ' | ' + (rx.dosage || 'As prescribed') + ' | ' + (rx.frequency || 'N/A'));
+            });
+          }
+
+          const fileName = 'bondhealth_records_' + new Date().toISOString().slice(0, 10) + '.pdf';
+          doc.save(fileName);
+        }
+
         // ============================================
         // UPDATED QUICK ACTIONS HANDLER
         // ============================================
-        function handleQuickAction(action) {
+        async function handleQuickAction(action) {
           switch(action) {
             case 'download':
-              showToast('Download', 'Downloading your medical records...', 'info');
-              // Simulate download after 1 second
-              setTimeout(() => {
-                showToast('Success', 'Records downloaded successfully!', 'success');
-              }, 1000);
+              showToast('Download', 'Preparing your medical records...', 'info');
+              try {
+                await downloadMedicalRecordsPdf();
+                showToast('Success', 'Medical records downloaded successfully!', 'success');
+              } catch (err) {
+                console.error('Download records failed:', err);
+                showToast('Error', 'Failed to download records. Please try again.', 'error');
+              }
               break;
               
             case 'notifications':
-              showToast('Notifications', 'You have 2 unread notifications', 'info');
+              document.querySelector('[data-section="messages"]')?.click();
+              if (typeof refreshPatientUnreadBadge === 'function') {
+                await refreshPatientUnreadBadge();
+              }
+              showToast('Notifications', 'Opened messages and refreshed unread count.', 'info');
               break;
               
             case 'help':
-              showToast('Help Center', 'Opening help center...', 'info');
-              // Open help modal or redirect
-              setTimeout(() => {
-                showToast('Info', 'Contact support: help@bondhealth.com', 'info');
-              }, 1000);
+              window.location.href = '/help-center';
+              showToast('Help Center', 'Opening support center.', 'info');
               break;
               
             case 'settings':
-              showToast('Settings', 'Opening settings...', 'info');
-              // Open profile modal as settings
-              setTimeout(() => {
-                document.getElementById('profileBtn').click();
-              }, 500);
+              if (typeof window.openPatientSettingsModal === 'function') {
+                window.openPatientSettingsModal();
+                showToast('Settings', 'Personalization settings opened.', 'info');
+              } else {
+                showToast('Settings', 'Settings are loading. Please try again.', 'info');
+              }
               break;
               
             default:
@@ -2149,6 +2349,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
           try {
             const response = await fetch('/api/doctors');
             const doctors = await response.json();
+            cachedDoctors = Array.isArray(doctors) ? doctors : [];
             const hospitalsResponse = await fetch('/api/hospitals');
             const hospitals = await hospitalsResponse.json();
           
@@ -2216,9 +2417,11 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
                 
                 <div id="hospitalsGrid" class="grid grid-cols-2 md:grid-cols-3 gap-3">
                   \${hospitals.map(hospital => \`
-                    <div class="hospital-card white-card rounded-xl p-3 cursor-pointer hover-lift text-center" onclick="filterByHospital('\${hospital.name}')">
-                      <div class="w-full h-16 rounded-lg flex items-center justify-center mb-2 cyan-light">
-                        <i class="fas fa-hospital-alt text-2xl cyan-text"></i>
+                    <div class="hospital-card white-card rounded-xl p-3 cursor-pointer hover-lift text-center" onclick="filterByHospital('\${encodeURIComponent(hospital.name || '')}')">
+                      <div class="w-full h-16 rounded-lg flex items-center justify-center mb-2 cyan-light overflow-hidden">
+                        \${hospital.photo_url
+                          ? \`<img src="\${hospital.photo_url}" alt="\${hospital.name}" class="w-full h-full object-cover">\`
+                          : '<i class="fas fa-hospital-alt text-2xl cyan-text"></i>'}
                       </div>
                       <p class="text-xs font-semibold cyan-text">\${hospital.name}</p>
                     </div>
@@ -2252,7 +2455,9 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
             <div class="doctor-card white-card rounded-xl p-4 hover-lift fade-in" style="animation-delay: \${index * 0.1}s">
               <div class="flex gap-3 mb-3">
                 <div class="w-12 h-12 rounded-lg cyan-light border-2 cyan-border flex items-center justify-center flex-shrink-0">
-                  <i class="fas fa-user-md text-xl cyan-text"></i>
+                  \${doc.photo_url
+                    ? \`<img src="\${doc.photo_url}" alt="\${doc.full_name}" class="w-full h-full object-cover rounded-lg">\`
+                    : '<i class="fas fa-user-md text-xl cyan-text"></i>'}
                 </div>
                 <div class="flex-1">
                   <h3 class="font-bold cyan-text text-base mb-0.5">\${doc.full_name}</h3>
@@ -2281,26 +2486,27 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         }
         
         function setupBookingEventListeners() {
-          document.getElementById('searchInput')?.addEventListener('input', async (e) => {
+          document.getElementById('searchInput')?.addEventListener('input', (e) => {
             searchQuery = e.target.value;
-            const doctors = await fetch('/api/doctors').then(res => res.json());
-            renderDoctors(doctors);
+            renderDoctors(cachedDoctors);
           });
           
           document.querySelectorAll('.filter-chip').forEach(chip => {
-            chip.addEventListener('click', async () => {
+            chip.addEventListener('click', () => {
               document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
               chip.classList.add('active');
               currentFilter = chip.dataset.filter;
-              const doctors = await fetch('/api/doctors').then(res => res.json());
-              renderDoctors(doctors);
+              renderDoctors(cachedDoctors);
             });
           });
         }
         
         async function openBookingModal(doctorId) {
-          const doctors = await fetch('/api/doctors').then(res => res.json());
-          selectedDoctor = doctors.find(d => d.doctor_id === doctorId);
+          if (!Array.isArray(cachedDoctors) || !cachedDoctors.length) {
+            const doctors = await fetch('/api/doctors').then(res => res.json());
+            cachedDoctors = Array.isArray(doctors) ? doctors : [];
+          }
+          selectedDoctor = cachedDoctors.find(d => d.doctor_id === doctorId);
           if (!selectedDoctor) return;
 
           const modal = document.getElementById('bookingModal');
@@ -2377,12 +2583,13 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         window.openBookingModal = openBookingModal;
         
         function filterByHospital(hospitalName) {
-          searchQuery = hospitalName;
+          const decodedHospitalName = decodeURIComponent(String(hospitalName || ''));
+          searchQuery = decodedHospitalName;
           const searchInput = document.getElementById('searchInput');
           if (searchInput) {
-            searchInput.value = hospitalName;
+            searchInput.value = decodedHospitalName;
           }
-          loadBookContent();
+          renderDoctors(cachedDoctors);
         }
         
         window.filterByHospital = filterByHospital;
@@ -2746,9 +2953,15 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
 
         function linkifyChatText(value) {
           const safe = escapeHtmlText(value);
-          return safe.replace(/(\/chat-room\?[^\s<]+)/g, function(url) {
-            return '<a href="' + url + '" target="_blank" rel="noopener noreferrer" class="underline text-cyan-700 font-medium">Join consultation room</a>';
-          });
+          return safe
+            .split(' ')
+            .map(function(part) {
+              if (part.startsWith('/chat-room?')) {
+                return '<a href="' + part + '" target="_blank" rel="noopener noreferrer" class="underline text-cyan-700 font-medium">Join consultation room</a>';
+              }
+              return part;
+            })
+            .join(' ');
         }
 
         function renderPatientChatMessages(messages) {

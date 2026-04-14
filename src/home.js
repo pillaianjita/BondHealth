@@ -4,6 +4,8 @@ const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 const cookieParser = require('cookie-parser');
 require('dotenv').config();
 const { query, getClient } = require('./db/config');
@@ -1244,12 +1246,34 @@ app.post('/api/hospital/add/doctor', authenticate, authorize('admin'), doctorUpl
         
         for (const [fieldName, docType] of Object.entries(fileFields)) {
             if (req.files && req.files[fieldName] && req.files[fieldName][0]) {
-                const fileUrl = '/uploads/doctors/' + 
+                let fileUrl = '/uploads/doctors/' + 
                     (fieldName === 'doctorImage' ? 'photos/' : 
                      fieldName === 'qualificationCertificate' ? 'qualifications/' :
                      fieldName === 'specializationCertificate' ? 'specializations/' :
                      fieldName === 'govtIdDocument' ? 'idproofs/' : 'appointments/') + 
                     req.files[fieldName][0].filename;
+
+                if (fieldName === 'doctorImage') {
+                    const fileName = req.files[fieldName][0].filename;
+                    const photoUrl = '/uploads/photos/' + fileName;
+                    const destinationDir = path.join(UPLOADS_ROOT, 'photos');
+                    const destinationPath = path.join(destinationDir, fileName);
+                    if (!fs.existsSync(destinationDir)) fs.mkdirSync(destinationDir, { recursive: true });
+
+                    const sourceCandidates = [
+                        req.files[fieldName][0].path,
+                        path.join(process.cwd(), 'uploads', 'doctors', 'photos', fileName),
+                        path.join(__dirname, '..', 'uploads', 'doctors', 'photos', fileName),
+                        path.join(__dirname, 'uploads', 'doctors', 'photos', fileName)
+                    ].filter(Boolean);
+                    const sourcePath = sourceCandidates.find(p => fs.existsSync(p));
+                    if (sourcePath && sourcePath !== destinationPath) {
+                        fs.copyFileSync(sourcePath, destinationPath);
+                    }
+
+                    await client.query('UPDATE doctors SET photo_url = $1 WHERE doctor_id = $2', [photoUrl, doctorId]);
+                    fileUrl = photoUrl;
+                }
                 
                 await client.query(
                     `INSERT INTO doctor_documents (doctor_id, document_type, file_url) 
@@ -1410,7 +1434,7 @@ app.get('/register-doctor', requireAuth('admin'), async (req, res) => {
 // Use multer middleware for file uploads
 const hospitalUpload = multer({ 
     storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+    limits: { fileSize: 15 * 1024 * 1024 } // 15MB limit
 });
 
 app.post('/api/hospitals/register', 
@@ -1418,7 +1442,11 @@ app.post('/api/hospitals/register',
         { name: 'hospitalLogo', maxCount: 1 },
         { name: 'hospitalMainPhoto', maxCount: 1 },
         { name: 'hospitalPhotos', maxCount: 5 },
-        { name: 'adminPhoto', maxCount: 1 }
+        { name: 'adminPhoto', maxCount: 1 },
+        { name: 'regCertificate', maxCount: 1 },
+        { name: 'hospitalLicense', maxCount: 1 },
+        { name: 'tradeLicense', maxCount: 1 },
+        { name: 'panCard', maxCount: 1 }
     ]), 
     async (req, res) => {
         try {
@@ -1484,6 +1512,347 @@ app.get('/add-lab', requireAuth('admin'), async (req, res) => {
     } catch (err) {
         console.error('Error loading add lab:', err);
         res.status(500).send('Error loading page');
+    }
+});
+
+async function ensurePasswordResetTable() {
+    await query(`
+      CREATE TABLE IF NOT EXISTS password_reset_otps (
+        reset_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+        otp_hash TEXT NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        used_at TIMESTAMP NULL,
+        attempts INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+}
+
+function hashOtp(otp) {
+    return crypto.createHash('sha256').update(String(otp)).digest('hex');
+}
+
+function generateOtpCode() {
+    return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function normalizePhoneDigits(value) {
+    return String(value || '').replace(/\D/g, '');
+}
+
+function looksLikePhoneLogin(value) {
+    return /^\+?[0-9][0-9\s\-()]{7,}$/.test(String(value || '').trim());
+}
+
+async function resolvePasswordResetUser(loginId) {
+    const normalizedLogin = String(loginId || '').trim();
+    if (!normalizedLogin) return null;
+
+    // 1) Try email/username first
+    const userResult = await query(
+        'SELECT user_id, email, username FROM users WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1) LIMIT 1',
+        [normalizedLogin]
+    );
+    if (userResult.rows[0]) {
+        const baseUser = userResult.rows[0];
+        const phoneLookup = await query(
+            `WITH profile_phones AS (
+                SELECT user_id, phone FROM patients WHERE phone IS NOT NULL
+                UNION ALL
+                SELECT user_id, phone FROM doctors WHERE phone IS NOT NULL
+                UNION ALL
+                SELECT user_id, phone FROM hospital_admins WHERE phone IS NOT NULL
+                UNION ALL
+                SELECT user_id, phone FROM lab_technicians WHERE phone IS NOT NULL
+             )
+             SELECT phone FROM profile_phones WHERE user_id = $1 LIMIT 1`,
+            [baseUser.user_id]
+        );
+        return { ...baseUser, phone: phoneLookup.rows[0]?.phone || null, matched_via: 'email_or_username' };
+    }
+
+    // 2) If input looks like a phone number, resolve via role profile tables
+    if (!looksLikePhoneLogin(normalizedLogin)) return null;
+    const inputDigits = normalizePhoneDigits(normalizedLogin);
+    if (!inputDigits) return null;
+
+    const phoneResult = await query(
+        `WITH profile_phones AS (
+            SELECT p.user_id, p.phone AS phone FROM patients p WHERE p.phone IS NOT NULL
+            UNION ALL
+            SELECT d.user_id, d.phone AS phone FROM doctors d WHERE d.phone IS NOT NULL
+            UNION ALL
+            SELECT ha.user_id, ha.phone AS phone FROM hospital_admins ha WHERE ha.phone IS NOT NULL
+            UNION ALL
+            SELECT lt.user_id, lt.phone AS phone FROM lab_technicians lt WHERE lt.phone IS NOT NULL
+         )
+         SELECT u.user_id, u.email, u.username, pp.phone
+         FROM profile_phones pp
+         JOIN users u ON u.user_id = pp.user_id
+         WHERE RIGHT(regexp_replace(pp.phone, '\\D', '', 'g'), 10) = RIGHT($1, 10)
+         ORDER BY u.created_at DESC
+         LIMIT 1`,
+        [inputDigits]
+    );
+
+    if (!phoneResult.rows[0]) return null;
+    return { ...phoneResult.rows[0], matched_via: 'phone' };
+}
+
+async function buildMailTransporter() {
+    const host = process.env.SMTP_HOST || process.env.MAIL_HOST || process.env.EMAIL_HOST;
+    const port = Number(process.env.SMTP_PORT || process.env.MAIL_PORT || process.env.EMAIL_PORT || 587);
+    const user = process.env.SMTP_USER || process.env.MAIL_USER || process.env.EMAIL_USER;
+    const pass = process.env.SMTP_PASS || process.env.MAIL_PASS || process.env.EMAIL_PASS;
+    const secure = String(process.env.SMTP_SECURE || process.env.MAIL_SECURE || process.env.EMAIL_SECURE || '').toLowerCase() === 'true';
+
+    if (!host || !user || !pass) {
+        return { mode: 'console', transporter: null, from: null };
+    }
+
+    const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure,
+        auth: { user, pass }
+    });
+
+    return {
+        mode: 'smtp',
+        transporter,
+        from: process.env.SMTP_FROM || process.env.MAIL_FROM || process.env.EMAIL_FROM || user
+    };
+}
+
+async function sendPasswordResetOtpEmail(email, otpCode) {
+    const mail = await buildMailTransporter();
+
+    if (mail.mode === 'console') {
+        return { mode: 'console-unavailable' };
+    }
+
+    const info = await mail.transporter.sendMail({
+        from: mail.from,
+        to: email,
+        subject: 'BondHealth Password Reset OTP',
+        text: `Your BondHealth OTP is ${otpCode}. It expires in 10 minutes.`,
+        html: `<div style="font-family:Segoe UI,Arial,sans-serif;line-height:1.5">
+          <h2 style="color:#0e7490">BondHealth Password Reset</h2>
+          <p>Your one-time password (OTP) is:</p>
+          <p style="font-size:28px;font-weight:700;letter-spacing:4px;color:#0f766e">${otpCode}</p>
+          <p>This OTP is valid for 10 minutes.</p>
+          <p>If you did not request this, please ignore this email.</p>
+        </div>`
+    });
+
+    return { mode: 'smtp', info };
+}
+
+async function sendPasswordResetOtpSms(phone, otpCode) {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID || process.env.SMS_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN || process.env.SMS_AUTH_TOKEN;
+    const fromPhone = process.env.TWILIO_PHONE_NUMBER || process.env.SMS_FROM_NUMBER;
+    if (!accountSid || !authToken || !fromPhone || !phone) {
+        return { mode: 'sms-unavailable' };
+    }
+
+    let twilioClientFactory;
+    try {
+        twilioClientFactory = require('twilio');
+    } catch (_) {
+        return { mode: 'sms-unavailable' };
+    }
+
+    const client = twilioClientFactory(accountSid, authToken);
+    const toPhone = String(phone).trim();
+    const msg = await client.messages.create({
+        from: fromPhone,
+        to: toPhone,
+        body: `Your BondHealth OTP is ${otpCode}. It expires in 10 minutes.`
+    });
+    return { mode: 'sms', sid: msg.sid };
+}
+
+async function issuePasswordResetOtp(loginId, isResend = false) {
+    await ensurePasswordResetTable();
+    const normalizedLogin = String(loginId || '').trim();
+    if (!normalizedLogin) {
+        return { status: 400, body: { success: false, message: 'Email, username, or phone is required' } };
+    }
+
+    const user = await resolvePasswordResetUser(normalizedLogin);
+    if (!user) {
+        // Privacy-safe response and smoother client UX:
+        // never expose whether account exists at request/resend stage.
+        return {
+            status: 200,
+            body: {
+                success: true,
+                message: isResend
+                    ? 'If an account exists, OTP has been resent to the registered channel.'
+                    : 'If an account exists, OTP has been sent to the registered channel.'
+            }
+        };
+    }
+
+    await query(
+        'UPDATE password_reset_otps SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL',
+        [user.user_id]
+    );
+
+    const otpCode = generateOtpCode();
+    const expiresAt = new Date(Date.now() + (10 * 60 * 1000));
+    await query(
+        `INSERT INTO password_reset_otps (user_id, otp_hash, expires_at)
+         VALUES ($1, $2, $3)`,
+        [user.user_id, hashOtp(otpCode), expiresAt]
+    );
+
+    const canUseEmail = !!user.email;
+    const emailDelivery = canUseEmail ? await sendPasswordResetOtpEmail(user.email, otpCode) : { mode: 'console-unavailable' };
+    let delivery = emailDelivery;
+
+    // If no email channel, and login matched by phone (or phone exists), try SMS
+    if (emailDelivery.mode !== 'smtp') {
+        const smsDelivery = await sendPasswordResetOtpSms(user.phone, otpCode);
+        if (smsDelivery.mode === 'sms') {
+            delivery = smsDelivery;
+        }
+    }
+
+    if (delivery.mode !== 'smtp' && delivery.mode !== 'sms') {
+        return {
+            status: 503,
+            body: {
+                success: false,
+                message: 'OTP delivery is not configured. Please configure SMTP for email or Twilio for SMS.'
+            }
+        };
+    }
+
+    const deliveryMessage = delivery.mode === 'sms'
+        ? (isResend ? 'OTP resent to your registered phone number' : 'OTP sent to your registered phone number')
+        : (isResend ? 'OTP resent to your registered email' : 'OTP sent to your registered email');
+
+    return {
+        status: 200,
+        body: {
+            success: true,
+            message: deliveryMessage,
+            email: user.email || null,
+            phone: user.phone || null,
+            channel: delivery.mode === 'sms' ? 'sms' : 'email'
+        }
+    };
+}
+
+app.post('/api/auth/forgot-password/request', async (req, res) => {
+    try {
+        const result = await issuePasswordResetOtp(req.body.email || req.body.username || req.body.loginId, false);
+        res.status(result.status).json(result.body);
+    } catch (error) {
+        console.error('Forgot password request error:', error);
+        res.status(500).json({ success: false, message: error.message || 'Failed to send OTP' });
+    }
+});
+
+app.post('/api/auth/forgot-password/resend', async (req, res) => {
+    try {
+        const result = await issuePasswordResetOtp(req.body.email || req.body.username || req.body.loginId, true);
+        res.status(result.status).json(result.body);
+    } catch (error) {
+        console.error('Forgot password resend error:', error);
+        res.status(500).json({ success: false, message: error.message || 'Failed to resend OTP' });
+    }
+});
+
+app.post('/api/auth/forgot-password/verify', async (req, res) => {
+    try {
+        await ensurePasswordResetTable();
+        const loginId = String(req.body.email || req.body.username || req.body.loginId || '').trim();
+        const otp = String(req.body.otp || '').trim();
+        if (!loginId || !otp) {
+            return res.status(400).json({ success: false, message: 'Email/username and OTP are required' });
+        }
+        const user = await resolvePasswordResetUser(loginId);
+        if (!user) return res.status(404).json({ success: false, message: 'Account not found' });
+
+        const otpRowResult = await query(
+            `SELECT reset_id, otp_hash, expires_at, used_at
+             FROM password_reset_otps
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [user.user_id]
+        );
+        const otpRow = otpRowResult.rows[0];
+        if (!otpRow || otpRow.used_at) {
+            return res.status(400).json({ success: false, message: 'OTP is invalid or already used' });
+        }
+        if (new Date(otpRow.expires_at).getTime() < Date.now()) {
+            return res.status(400).json({ success: false, message: 'OTP expired. Please request a new one.' });
+        }
+        if (hashOtp(otp) !== otpRow.otp_hash) {
+            await query('UPDATE password_reset_otps SET attempts = attempts + 1 WHERE reset_id = $1', [otpRow.reset_id]);
+            return res.status(400).json({ success: false, message: 'Invalid OTP' });
+        }
+        res.json({ success: true, message: 'OTP verified' });
+    } catch (error) {
+        console.error('Forgot password verify error:', error);
+        res.status(500).json({ success: false, message: 'Failed to verify OTP' });
+    }
+});
+
+app.post('/api/auth/forgot-password/reset', async (req, res) => {
+    try {
+        await ensurePasswordResetTable();
+        const loginId = String(req.body.email || req.body.username || req.body.loginId || '').trim();
+        const otp = String(req.body.otp || '').trim();
+        const newPassword = String(req.body.newPassword || '');
+        const confirmPassword = String(req.body.confirmPassword || '');
+
+        if (!loginId || !otp || !newPassword || !confirmPassword) {
+            return res.status(400).json({ success: false, message: 'All fields are required' });
+        }
+        if (newPassword.length < 8) {
+            return res.status(400).json({ success: false, message: 'Password must be at least 8 characters' });
+        }
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({ success: false, message: 'Passwords do not match' });
+        }
+
+        const user = await resolvePasswordResetUser(loginId);
+        if (!user) return res.status(404).json({ success: false, message: 'Account not found' });
+
+        const otpRowResult = await query(
+            `SELECT reset_id, otp_hash, expires_at, used_at
+             FROM password_reset_otps
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [user.user_id]
+        );
+        const otpRow = otpRowResult.rows[0];
+        if (!otpRow || otpRow.used_at) {
+            return res.status(400).json({ success: false, message: 'OTP is invalid or already used' });
+        }
+        if (new Date(otpRow.expires_at).getTime() < Date.now()) {
+            return res.status(400).json({ success: false, message: 'OTP expired. Please request a new one.' });
+        }
+        if (hashOtp(otp) !== otpRow.otp_hash) {
+            await query('UPDATE password_reset_otps SET attempts = attempts + 1 WHERE reset_id = $1', [otpRow.reset_id]);
+            return res.status(400).json({ success: false, message: 'Invalid OTP' });
+        }
+
+        const newHash = await bcrypt.hash(newPassword, 10);
+        await query('UPDATE users SET password_hash = $1, must_change_password = false WHERE user_id = $2', [newHash, user.user_id]);
+        await query('UPDATE password_reset_otps SET used_at = NOW() WHERE reset_id = $1', [otpRow.reset_id]);
+
+        res.json({ success: true, message: 'Password reset successful. Please sign in with your new password.' });
+    } catch (error) {
+        console.error('Forgot password reset error:', error);
+        res.status(500).json({ success: false, message: 'Failed to reset password' });
     }
 });
 
@@ -2625,8 +2994,21 @@ app.get('/api/prescriptions', authenticate, async (req, res) => {
 
 app.get('/api/doctors', authenticate, async (req, res) => {
     try {
+        await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS logo_filename TEXT");
+        await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS main_photo_filename TEXT");
         const result = await query(
-            `SELECT d.*, h.name as hospital_name FROM doctors d
+            `SELECT d.*,
+                    h.name as hospital_name,
+                    h.logo_filename,
+                    h.main_photo_filename,
+                    CASE
+                      WHEN h.main_photo_filename IS NOT NULL AND h.main_photo_filename <> ''
+                      THEN '/uploads/hospitals/photos/' || h.main_photo_filename
+                      WHEN h.logo_filename IS NOT NULL AND h.logo_filename <> ''
+                      THEN '/uploads/hospitals/logos/' || h.logo_filename
+                      ELSE NULL
+                    END AS hospital_photo_url
+             FROM doctors d
              JOIN hospitals h ON d.hospital_id = h.hospital_id
              WHERE d.status NOT IN ('On Leave', 'Inactive') ORDER BY d.full_name`
         );
@@ -2638,7 +3020,27 @@ app.get('/api/doctors', authenticate, async (req, res) => {
 
 app.get('/api/hospitals', authenticate, async (req, res) => {
     try {
-        const result = await query('SELECT * FROM hospitals ORDER BY name');
+        await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS logo_filename TEXT");
+        await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS main_photo_filename TEXT");
+        await query("ALTER TABLE hospital_admins ADD COLUMN IF NOT EXISTS photo_url TEXT");
+        const result = await query(
+            `SELECT h.*,
+                    CASE
+                      WHEN h.main_photo_filename IS NOT NULL AND h.main_photo_filename <> ''
+                      THEN '/uploads/hospitals/photos/' || h.main_photo_filename
+                      WHEN h.logo_filename IS NOT NULL AND h.logo_filename <> ''
+                      THEN '/uploads/hospitals/logos/' || h.logo_filename
+                      ELSE NULL
+                    END AS photo_url,
+                    (
+                      SELECT ha.photo_url
+                      FROM hospital_admins ha
+                      WHERE ha.hospital_id = h.hospital_id
+                      LIMIT 1
+                    ) AS admin_photo_url
+             FROM hospitals h
+             ORDER BY h.name`
+        );
         res.json(result.rows);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -2652,8 +3054,21 @@ app.get('/api/hospitals', authenticate, async (req, res) => {
 // Get doctor profile
 app.get('/api/doctor', authenticate, authorize('doctor'), async (req, res) => {
     try {
+        await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS logo_filename TEXT");
+        await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS main_photo_filename TEXT");
         const result = await query(
-            `SELECT d.*, h.name as hospital_name FROM doctors d
+            `SELECT d.*,
+                    h.name as hospital_name,
+                    h.logo_filename,
+                    h.main_photo_filename,
+                    CASE
+                      WHEN h.main_photo_filename IS NOT NULL AND h.main_photo_filename <> ''
+                      THEN '/uploads/hospitals/photos/' || h.main_photo_filename
+                      WHEN h.logo_filename IS NOT NULL AND h.logo_filename <> ''
+                      THEN '/uploads/hospitals/logos/' || h.logo_filename
+                      ELSE NULL
+                    END AS hospital_photo_url
+             FROM doctors d
              JOIN hospitals h ON d.hospital_id = h.hospital_id
              WHERE d.user_id = $1`,
             [req.user.id]
@@ -2842,6 +3257,126 @@ app.put('/api/admin/hospital/visit-policy', authenticate, authorize('admin'), as
         res.status(500).json({ error: error.message });
     }
 });
+
+app.get('/api/admin/profile', authenticate, authorize('admin'), async (req, res) => {
+    try {
+        await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS main_photo_filename TEXT");
+        await query("ALTER TABLE hospital_admins ADD COLUMN IF NOT EXISTS photo_url TEXT");
+        const result = await query(
+            `SELECT h.hospital_id, h.name AS hospital_name, h.type AS hospital_type, h.city AS hospital_city,
+                    h.phone AS hospital_phone, h.email AS hospital_email, h.logo_filename, h.main_photo_filename,
+                    ha.full_name AS admin_full_name, ha.position AS admin_position, ha.phone AS admin_phone,
+                    ha.email AS admin_email, ha.photo_url AS admin_photo_url
+             FROM hospital_admins ha
+             JOIN hospitals h ON h.hospital_id = ha.hospital_id
+             WHERE ha.user_id = $1
+             LIMIT 1`,
+            [req.user.id]
+        );
+        if (!result.rows[0]) return res.status(404).json({ success: false, error: 'Admin profile not found' });
+        res.json({ success: true, profile: result.rows[0] });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.put('/api/admin/profile', authenticate, authorize('admin'),
+    hospitalUpload.fields([
+        { name: 'hospitalLogo', maxCount: 1 },
+        { name: 'hospitalMainPhoto', maxCount: 1 },
+        { name: 'adminPhoto', maxCount: 1 }
+    ]),
+    async (req, res) => {
+        const client = await getClient();
+        try {
+            await client.query('BEGIN');
+            await client.query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS main_photo_filename TEXT");
+            await client.query("ALTER TABLE hospital_admins ADD COLUMN IF NOT EXISTS photo_url TEXT");
+
+            const adminResult = await client.query(
+                'SELECT hospital_id FROM hospital_admins WHERE user_id = $1 LIMIT 1',
+                [req.user.id]
+            );
+            const hospitalId = adminResult.rows[0]?.hospital_id;
+            if (!hospitalId) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ success: false, error: 'Hospital not found for this admin' });
+            }
+
+            const ensureDir = (dirPath) => {
+                if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+            };
+            const saveBufferFile = (file, dirPath, fileBaseName) => {
+                if (!file) return null;
+                ensureDir(dirPath);
+                const ext = path.extname(file.originalname || '').toLowerCase() || '.jpg';
+                const filename = fileBaseName + '_' + Date.now() + ext;
+                fs.writeFileSync(path.join(dirPath, filename), file.buffer);
+                return filename;
+            };
+
+            const logoFile = req.files?.hospitalLogo?.[0];
+            const mainPhotoFile = req.files?.hospitalMainPhoto?.[0];
+            const adminPhotoFile = req.files?.adminPhoto?.[0];
+
+            const newLogoFilename = saveBufferFile(logoFile, path.join(UPLOADS_ROOT, 'hospitals', 'logos'), 'hospital_logo');
+            const newMainPhotoFilename = saveBufferFile(mainPhotoFile, path.join(UPLOADS_ROOT, 'hospitals', 'photos'), 'hospital_main');
+            const newAdminPhotoFilename = saveBufferFile(adminPhotoFile, path.join(UPLOADS_ROOT, 'admins', 'photos'), 'admin_photo');
+            const newAdminPhotoUrl = newAdminPhotoFilename ? `/uploads/admins/photos/${newAdminPhotoFilename}` : null;
+
+            const {
+                hospital_name,
+                hospital_type,
+                hospital_city,
+                hospital_phone,
+                hospital_email,
+                admin_full_name,
+                admin_position,
+                admin_phone,
+                admin_email
+            } = req.body;
+
+            await client.query(
+                `UPDATE hospitals
+                 SET name = COALESCE(NULLIF($1, ''), name),
+                     type = COALESCE(NULLIF($2, ''), type),
+                     city = COALESCE(NULLIF($3, ''), city),
+                     phone = COALESCE(NULLIF($4, ''), phone),
+                     email = COALESCE(NULLIF($5, ''), email),
+                     logo_filename = COALESCE($6, logo_filename),
+                     main_photo_filename = COALESCE($7, main_photo_filename)
+                 WHERE hospital_id = $8`,
+                [
+                    hospital_name, hospital_type, hospital_city, hospital_phone, hospital_email,
+                    newLogoFilename, newMainPhotoFilename, hospitalId
+                ]
+            );
+
+            await client.query(
+                `UPDATE hospital_admins
+                 SET full_name = COALESCE(NULLIF($1, ''), full_name),
+                     position = COALESCE(NULLIF($2, ''), position),
+                     phone = COALESCE(NULLIF($3, ''), phone),
+                     email = COALESCE(NULLIF($4, ''), email),
+                     photo_url = COALESCE($5, photo_url)
+                 WHERE user_id = $6`,
+                [admin_full_name, admin_position, admin_phone, admin_email, newAdminPhotoUrl, req.user.id]
+            );
+
+            if (admin_email && String(admin_email).trim()) {
+                await client.query('UPDATE users SET email = $1 WHERE user_id = $2', [String(admin_email).trim().toLowerCase(), req.user.id]);
+            }
+
+            await client.query('COMMIT');
+            res.json({ success: true, message: 'Profile updated successfully' });
+        } catch (error) {
+            await client.query('ROLLBACK');
+            res.status(500).json({ success: false, error: error.message });
+        } finally {
+            client.release();
+        }
+    }
+);
 
 // Lab reports for doctor (dashboard refresh)
 app.get('/api/doctor/reports', authenticate, authorize('doctor'), async (req, res) => {
@@ -4110,7 +4645,14 @@ app.get('/_sdk/data_sdk.js', (req, res) => {
 // ============================================
 // PAGE ROUTES
 // ============================================
-app.get('/', (req, res) => res.send(generateHTML()));
+app.get('/', async (req, res) => {
+    try {
+        res.send(await generateHTML());
+    } catch (error) {
+        console.error('Homepage render error:', error);
+        res.status(500).send('<h1>500</h1><p>Failed to load homepage</p>');
+    }
+});
 
 app.get('/signin', (req, res) => {
     try { res.setHeader('Content-Type','text/html'); res.send(require('./signin.js')()); }
@@ -4125,6 +4667,80 @@ app.get('/patient-signup', (req, res) => {
 app.get('/admin-signup', (req, res) => {
     try { res.setHeader('Content-Type','text/html'); res.send(require('./HospitalRegistration.js')()); }
     catch (err) { res.status(500).send('<h1>500</h1><p>HospitalRegistration.js not found</p><a href="/signin">Sign In</a>'); }
+});
+
+app.get('/help-center', (req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BondHealth Help Center</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>body{font-family:Arial,sans-serif;}</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div class="max-w-4xl mx-auto px-4 py-8">
+    <div class="bg-white rounded-2xl shadow p-6 mb-6">
+      <h1 class="text-2xl font-bold text-cyan-700 mb-2">BondHealth Help Center</h1>
+      <p class="text-sm text-slate-600">Support for patients, doctors, and hospital teams.</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-6 mb-6">
+      <div class="bg-white rounded-2xl shadow p-6">
+        <h2 class="text-lg font-semibold text-cyan-700 mb-3">Contact Details</h2>
+        <p class="text-sm mb-2"><strong>Support Number:</strong> +91 80 4567 9000</p>
+        <p class="text-sm mb-2"><strong>Email:</strong> help@bondhealth.com</p>
+        <p class="text-sm"><strong>Hours:</strong> Mon-Sat, 9:00 AM - 8:00 PM IST</p>
+      </div>
+      <div class="bg-white rounded-2xl shadow p-6">
+        <h2 class="text-lg font-semibold text-cyan-700 mb-3">About Website Makers</h2>
+        <p class="text-sm mb-2">Built and maintained by the BondHealth product and engineering team.</p>
+        <p class="text-sm">Our focus is secure healthcare communication, appointment coordination, and patient record access.</p>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow p-6">
+      <h2 class="text-lg font-semibold text-cyan-700 mb-3">Chat with Support</h2>
+      <p class="text-sm text-slate-600 mb-4">Leave a message and our support team will contact you.</p>
+      <form id="supportForm" class="space-y-3">
+        <input id="supportName" type="text" placeholder="Your name" class="w-full border border-slate-200 rounded-xl px-3 py-2" required />
+        <input id="supportEmail" type="email" placeholder="Your email" class="w-full border border-slate-200 rounded-xl px-3 py-2" required />
+        <textarea id="supportMessage" placeholder="Describe your issue..." rows="4" class="w-full border border-slate-200 rounded-xl px-3 py-2" required></textarea>
+        <div class="flex gap-3">
+          <button type="submit" class="bg-cyan-600 text-white px-4 py-2 rounded-xl">Send Message</button>
+          <a href="/patient-dashboard" class="px-4 py-2 rounded-xl border border-slate-300">Back to Dashboard</a>
+        </div>
+      </form>
+      <p id="supportStatus" class="text-sm mt-3 text-slate-600"></p>
+    </div>
+  </div>
+  <script>
+    document.getElementById('supportForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const status = document.getElementById('supportStatus');
+      status.textContent = 'Sending message...';
+      try {
+        const res = await fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: document.getElementById('supportName').value,
+            email: document.getElementById('supportEmail').value,
+            message: '[HELP CENTER] ' + document.getElementById('supportMessage').value
+          })
+        });
+        const data = await res.json();
+        status.textContent = data.message || 'Message sent successfully.';
+        if (res.ok) document.getElementById('supportForm').reset();
+      } catch (err) {
+        status.textContent = 'Failed to send message. Please try again.';
+      }
+    });
+  </script>
+</body>
+</html>`);
 });
 
 app.get('/patient-dashboard', requireAuth('patient'), async (req, res) => {
@@ -4208,7 +4824,65 @@ app.get('/add-lab',        requireAuth('admin'), (req, res) => { try { res.setHe
 // ============================================
 // HOMEPAGE HTML
 // ============================================
-function generateHTML() {
+async function generateHTML() {
+    let networkStats = {
+        hospitals: '0',
+        patients: '0',
+        doctors: '0',
+        labs: '0'
+    };
+    let homepageHospitals = [];
+    try {
+        await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS main_photo_filename TEXT");
+        await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS logo_filename TEXT");
+        const [hospitalsCount, patientsCount, doctorsCount, labsCount, frequentHospitals] = await Promise.all([
+            query('SELECT COUNT(*)::int AS total FROM hospitals'),
+            query("SELECT COUNT(*)::int AS total FROM users WHERE role = 'patient' AND is_active = true"),
+            query("SELECT COUNT(*)::int AS total FROM doctors WHERE status != 'Inactive'"),
+            query('SELECT COUNT(*)::int AS total FROM lab_technicians'),
+            query(
+                `SELECT h.name, h.city, h.main_photo_filename, h.logo_filename, COUNT(a.appointment_id)::int AS appointment_count
+                 FROM hospitals h
+                 LEFT JOIN appointments a ON a.hospital_id = h.hospital_id
+                 GROUP BY h.hospital_id, h.name, h.city, h.main_photo_filename, h.logo_filename
+                 ORDER BY appointment_count DESC, h.name ASC
+                 LIMIT 4`
+            )
+        ]);
+        networkStats = {
+            hospitals: String(hospitalsCount.rows[0]?.total || 0),
+            patients: String(patientsCount.rows[0]?.total || 0),
+            doctors: String(doctorsCount.rows[0]?.total || 0),
+            labs: String(labsCount.rows[0]?.total || 0)
+        };
+        homepageHospitals = frequentHospitals.rows || [];
+    } catch (error) {
+        console.error('Homepage dynamic data fetch failed:', error.message);
+    }
+
+    const frequentlyVisitedHospitalsHtml = (homepageHospitals.length ? homepageHospitals : [
+        { name: 'City General Hospital', city: 'Downtown' },
+        { name: 'St. Mary Medical', city: 'Westside' },
+        { name: 'Regional Health Center', city: 'North District' },
+        { name: 'Unity Care Hospital', city: 'East End' }
+    ]).map((h) => {
+        const photoUrl = h.main_photo_filename
+            ? `/uploads/hospitals/photos/${h.main_photo_filename}`
+            : (h.logo_filename ? `/uploads/hospitals/logos/${h.logo_filename}` : '');
+        return `<div class="bg-white rounded-2xl shadow-lg overflow-hidden card-hover">
+          <div class="aspect-video bg-gradient-to-br from-[#0088cc] to-[#00aadd] flex items-center justify-center overflow-hidden">
+            ${photoUrl
+                ? `<img src="${photoUrl}" alt="${h.name}" class="w-full h-full object-cover">`
+                : `<svg class="w-20 h-20 text-white opacity-90" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 11h-4v4h-4v-4H6v-4h4V6h4v4h4v4z"/></svg>`}
+          </div>
+          <div class="p-5">
+            <h3 class="font-bold text-[#006d77] text-lg">${h.name}</h3>
+            <p class="text-gray-500 text-sm mb-4">${h.city || 'Network Partner'}</p>
+            <button onclick="window.location.href='/signin'" class="w-full bg-gradient-to-r from-[#0088cc] to-[#00aadd] text-white py-2.5 rounded-lg font-medium text-sm hover:shadow-lg hover:scale-105 transition-all">Select Facility</button>
+          </div>
+        </div>`;
+    }).join('');
+
     return `<!doctype html>
 <html lang="en" class="h-full">
  <head>
@@ -4269,7 +4943,7 @@ function generateHTML() {
     </div>
    </header>
 
-   <section class="hero-gradient py-20 lg:py-28 relative overflow-hidden">
+   <section id="about" class="hero-gradient py-20 lg:py-28 relative overflow-hidden">
     <div class="floating-shape top-20 right-10 w-64 h-64 bg-[#0088cc]"></div>
     <div class="floating-shape bottom-10 left-10 w-96 h-96 bg-[#00aadd]" style="animation-delay:2s"></div>
     <div class="floating-shape top-40 left-1/4 w-48 h-48 bg-[#0099cc]" style="animation-delay:4s"></div>
@@ -4281,7 +4955,7 @@ function generateHTML() {
        <p id="about-text" class="text-lg text-gray-600 mb-8 leading-relaxed max-w-xl">BondHealth is a state-wide digital ecosystem that bridges the gap between you and your medical providers. We securely centralize your health records, ensuring that your medical history, appointments, and lab results are accessible at every hospital you visit.</p>
        <div class="flex flex-wrap gap-4">
         <button onclick="window.location.href='/signin'" class="bg-gradient-to-r from-[#00c8ff] to-[#00ffff] hover:from-[#00b0e0] hover:to-[#00e0e0] text-white px-8 py-3.5 rounded-full font-semibold transition-all hover:shadow-xl hover:shadow-cyan-300 animate-pulse-glow hover:scale-105">Get Started Free</button>
-        <button onclick="window.location.href='/signin'" class="border-2 border-[#00c8ff] text-[#00c8ff] hover:bg-[#00c8ff] hover:text-white px-8 py-3.5 rounded-full font-semibold transition-all hover:scale-105 hover:shadow-lg">Learn More</button>
+        <button onclick="document.getElementById('network')?.scrollIntoView({ behavior: 'smooth' })" class="border-2 border-[#00c8ff] text-[#00c8ff] hover:bg-[#00c8ff] hover:text-white px-8 py-3.5 rounded-full font-semibold transition-all hover:scale-105 hover:shadow-lg">Learn More</button>
        </div>
       </div>
       <div class="relative hidden lg:block">
@@ -4309,10 +4983,10 @@ function generateHTML() {
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
      <div class="text-center mb-12"><h2 class="text-3xl md:text-4xl font-bold text-[#1a365d] mb-4">The Bond Network</h2><p class="text-gray-600 max-w-2xl mx-auto">Our growing ecosystem connects healthcare providers across the state</p></div>
      <div class="grid grid-cols-2 lg:grid-cols-4 gap-6">
-      <div class="stat-card bg-gradient-to-br from-blue-50 to-white p-6 rounded-2xl shadow-lg border border-blue-100 card-hover text-center"><div class="text-4xl mb-3">🏥</div><div class="text-3xl md:text-4xl font-bold text-[#0088cc] mb-1">120+</div><div class="text-sm text-gray-600 font-medium">Partner Hospitals</div><div class="text-xs text-gray-400 mt-1">Across the State</div></div>
-      <div class="stat-card bg-gradient-to-br from-cyan-50 to-white p-6 rounded-2xl shadow-lg border border-cyan-100 card-hover text-center"><div class="text-4xl mb-3">👥</div><div class="text-3xl md:text-4xl font-bold text-[#0099cc] mb-1">50,000+</div><div class="text-sm text-gray-600 font-medium">Active Users</div><div class="text-xs text-gray-400 mt-1">Lives Connected</div></div>
-      <div class="stat-card bg-gradient-to-br from-teal-50 to-white p-6 rounded-2xl shadow-lg border border-teal-100 card-hover text-center"><div class="text-4xl mb-3">👨‍⚕️</div><div class="text-3xl md:text-4xl font-bold text-[#00aadd] mb-1">1,500+</div><div class="text-sm text-gray-600 font-medium">Verified Doctors</div><div class="text-xs text-gray-400 mt-1">Specialists On-call</div></div>
-      <div class="stat-card bg-gradient-to-br from-sky-50 to-white p-6 rounded-2xl shadow-lg border border-sky-100 card-hover text-center"><div class="text-4xl mb-3">🔬</div><div class="text-3xl md:text-4xl font-bold text-[#66ccff] mb-1">300+</div><div class="text-sm text-gray-600 font-medium">Diagnostic Labs</div><div class="text-xs text-gray-400 mt-1">Instant Results</div></div>
+      <div class="stat-card bg-gradient-to-br from-blue-50 to-white p-6 rounded-2xl shadow-lg border border-blue-100 card-hover text-center"><div class="text-4xl mb-3">🏥</div><div class="text-3xl md:text-4xl font-bold text-[#0088cc] mb-1">${networkStats.hospitals}</div><div class="text-sm text-gray-600 font-medium">Partner Hospitals</div><div class="text-xs text-gray-400 mt-1">Across the State</div></div>
+      <div class="stat-card bg-gradient-to-br from-cyan-50 to-white p-6 rounded-2xl shadow-lg border border-cyan-100 card-hover text-center"><div class="text-4xl mb-3">👥</div><div class="text-3xl md:text-4xl font-bold text-[#0099cc] mb-1">${networkStats.patients}</div><div class="text-sm text-gray-600 font-medium">Active Users</div><div class="text-xs text-gray-400 mt-1">Lives Connected</div></div>
+      <div class="stat-card bg-gradient-to-br from-teal-50 to-white p-6 rounded-2xl shadow-lg border border-teal-100 card-hover text-center"><div class="text-4xl mb-3">👨‍⚕️</div><div class="text-3xl md:text-4xl font-bold text-[#00aadd] mb-1">${networkStats.doctors}</div><div class="text-sm text-gray-600 font-medium">Verified Doctors</div><div class="text-xs text-gray-400 mt-1">Specialists On-call</div></div>
+      <div class="stat-card bg-gradient-to-br from-sky-50 to-white p-6 rounded-2xl shadow-lg border border-sky-100 card-hover text-center"><div class="text-4xl mb-3">🔬</div><div class="text-3xl md:text-4xl font-bold text-[#66ccff] mb-1">${networkStats.labs}</div><div class="text-sm text-gray-600 font-medium">Diagnostic Labs</div><div class="text-xs text-gray-400 mt-1">Instant Results</div></div>
      </div>
     </div>
    </section>
@@ -4321,10 +4995,7 @@ function generateHTML() {
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
      <div class="text-center mb-12"><h2 class="text-3xl md:text-4xl font-bold text-[#1a365d] mb-4">Frequently Visited Hospitals</h2><p class="text-gray-600 max-w-2xl mx-auto">Find and book appointments at our partner facilities</p></div>
      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-      <div class="bg-white rounded-2xl shadow-lg overflow-hidden card-hover"><div class="aspect-video bg-gradient-to-br from-[#0088cc] to-[#00aadd] flex items-center justify-center"><svg class="w-20 h-20 text-white opacity-90" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 11h-4v4h-4v-4H6v-4h4V6h4v4h4v4z"/></svg></div><div class="p-5"><h3 class="font-bold text-[#006d77] text-lg">City General Hospital</h3><p class="text-gray-500 text-sm mb-4">Downtown Branch</p><button onclick="window.location.href='/signin'" class="w-full bg-gradient-to-r from-[#0088cc] to-[#00aadd] text-white py-2.5 rounded-lg font-medium text-sm hover:shadow-lg hover:scale-105 transition-all">Select Facility</button></div></div>
-      <div class="bg-white rounded-2xl shadow-lg overflow-hidden card-hover"><div class="aspect-video bg-gradient-to-br from-[#0099cc] to-[#66ccff] flex items-center justify-center"><svg class="w-20 h-20 text-white opacity-90" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 11h-4v4h-4v-4H6v-4h4V6h4v4h4v4z"/></svg></div><div class="p-5"><h3 class="font-bold text-[#006d77] text-lg">St. Mary's Medical</h3><p class="text-gray-500 text-sm mb-4">Westside Campus</p><button onclick="window.location.href='/signin'" class="w-full bg-gradient-to-r from-[#0099cc] to-[#66ccff] text-white py-2.5 rounded-lg font-medium text-sm hover:shadow-lg hover:scale-105 transition-all">Select Facility</button></div></div>
-      <div class="bg-white rounded-2xl shadow-lg overflow-hidden card-hover"><div class="aspect-video bg-gradient-to-br from-[#00aadd] to-[#00aadd] flex items-center justify-center"><svg class="w-20 h-20 text-white opacity-90" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 11h-4v4h-4v-4H6v-4h4V6h4v4h4v4z"/></svg></div><div class="p-5"><h3 class="font-bold text-[#006d77] text-lg">Regional Health Center</h3><p class="text-gray-500 text-sm mb-4">North District</p><button onclick="window.location.href='/signin'" class="w-full bg-gradient-to-r from-[#00aadd] to-[#00aadd] text-white py-2.5 rounded-lg font-medium text-sm hover:shadow-lg hover:scale-105 transition-all">Select Facility</button></div></div>
-      <div class="bg-white rounded-2xl shadow-lg overflow-hidden card-hover"><div class="aspect-video bg-gradient-to-br from-[#66ccff] to-[#99ddff] flex items-center justify-center"><svg class="w-20 h-20 text-white opacity-90" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 11h-4v4h-4v-4H6v-4h4V6h4v4h4v4z"/></svg></div><div class="p-5"><h3 class="font-bold text-[#006d77] text-lg">Unity Care Hospital</h3><p class="text-gray-500 text-sm mb-4">East End Location</p><button onclick="window.location.href='/signin'" class="w-full bg-gradient-to-r from-[#66ccff] to-[#99ddff] text-white py-2.5 rounded-lg font-medium text-sm hover:shadow-lg hover:scale-105 transition-all">Book Now</button></div></div>
+      ${frequentlyVisitedHospitalsHtml}
      </div>
     </div>
    </section>

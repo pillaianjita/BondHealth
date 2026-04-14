@@ -53,11 +53,24 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
   const allAppointments = getAllAppointments(appointmentsData);
   const hospitalName = hospitalData.name || 'Hospital Dashboard';
   const hospitalType = hospitalData.type || 'Admin Dashboard';
-  const hospitalLogoUrl = hospitalData.logo_filename
-    ? `/uploads/hospitals/logos/${hospitalData.logo_filename}`
-    : '';
+  const hospitalLogoUrl = hospitalData.main_photo_filename
+    ? `/uploads/hospitals/photos/${hospitalData.main_photo_filename}`
+    : (hospitalData.logo_filename
+      ? `/uploads/hospitals/logos/${hospitalData.logo_filename}`
+      : '');
   const adminPhotoUrl = hospitalData.admin_photo_url || '';
   const visitModePolicy = hospitalData.visit_mode_policy || 'both';
+  const adminProfileSeed = {
+    hospitalName: hospitalData.name || '',
+    hospitalType: hospitalData.type || '',
+    hospitalCity: hospitalData.city || '',
+    hospitalPhone: hospitalData.phone || '',
+    hospitalEmail: hospitalData.email || '',
+    adminName: hospitalData.admin_full_name || '',
+    adminDesignation: hospitalData.admin_position || '',
+    adminPhone: hospitalData.admin_phone || '',
+    adminEmail: hospitalData.admin_email || ''
+  };
 
   return `
 <!DOCTYPE html>
@@ -115,8 +128,10 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
     <!-- Sidebar -->
     <div class="sidebar p-6" id="sidebar">
         <div class="flex items-center gap-3 mb-8">
-            <div class="w-12 h-12 bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-lg flex items-center justify-center">
-                <i class="fas fa-hospital text-white text-xl"></i>
+            <div class="w-12 h-12 bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-lg flex items-center justify-center overflow-hidden">
+                ${hospitalLogoUrl
+                  ? `<img src="${hospitalLogoUrl}" alt="${hospitalName}" class="w-full h-full object-cover">`
+                  : '<i class="fas fa-hospital text-white text-xl"></i>'}
             </div>
             <div>
             <h1 class="font-bold text-xl text-gray-800">${hospitalName}</h1>
@@ -133,6 +148,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
                   ? `<span class="ml-2 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-xs font-bold rounded-full">${pendingLeaveRequests.length}</span>`
                   : ''}
             </div>
+            <div class="nav-item" onclick="openAdminProfileModal()"><i class="fas fa-user-edit mr-3"></i>Edit Profile</div>
             <div class="nav-item" onclick="openDoctorRegistration()"><i class="fas fa-user-plus mr-3"></i>Add Details</div>
         </div>
         <div class="pt-6 border-t border-gray-200">
@@ -171,6 +187,9 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
             <div class="flex items-center gap-4">
                 <button class="bg-cyan-600 text-white px-6 py-2 rounded-lg hover:bg-cyan-700 transition-colors flex items-center gap-2" onclick="openAddDoctorForm()">
                     <i class="fas fa-user-plus"></i> Register Doctor
+                </button>
+                <button class="bg-white border border-cyan-600 text-cyan-700 px-4 py-2 rounded-lg hover:bg-cyan-50 transition-colors flex items-center gap-2" onclick="openAdminProfileModal()">
+                    <i class="fas fa-user-edit"></i> Edit Profile
                 </button>
                 <div class="relative" title="${pendingLeaveRequests.length} pending leave request(s)">
                     <i class="fas fa-bell text-gray-500 text-xl cursor-pointer"></i>
@@ -480,10 +499,46 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
         </div>
     </div>
 
+    <div class="modal" id="adminProfileModal">
+        <div class="modal-content">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-xl font-bold text-gray-800">Edit Admin & Hospital Profile</h2>
+                    <button type="button" onclick="closeModal('adminProfileModal')" class="text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></button>
+                </div>
+                <form id="adminProfileForm" class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label class="block text-gray-700 mb-1 text-sm">Hospital Name</label><input id="editHospitalName" class="w-full p-3 border border-gray-300 rounded-lg" required></div>
+                        <div><label class="block text-gray-700 mb-1 text-sm">Hospital Type</label><input id="editHospitalType" class="w-full p-3 border border-gray-300 rounded-lg"></div>
+                        <div><label class="block text-gray-700 mb-1 text-sm">City</label><input id="editHospitalCity" class="w-full p-3 border border-gray-300 rounded-lg"></div>
+                        <div><label class="block text-gray-700 mb-1 text-sm">Hospital Phone</label><input id="editHospitalPhone" class="w-full p-3 border border-gray-300 rounded-lg"></div>
+                        <div class="md:col-span-2"><label class="block text-gray-700 mb-1 text-sm">Hospital Email</label><input id="editHospitalEmail" type="email" class="w-full p-3 border border-gray-300 rounded-lg"></div>
+                    </div>
+                    <div class="border-t pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label class="block text-gray-700 mb-1 text-sm">Admin Name</label><input id="editAdminName" class="w-full p-3 border border-gray-300 rounded-lg"></div>
+                        <div><label class="block text-gray-700 mb-1 text-sm">Designation</label><input id="editAdminDesignation" class="w-full p-3 border border-gray-300 rounded-lg"></div>
+                        <div><label class="block text-gray-700 mb-1 text-sm">Admin Phone</label><input id="editAdminPhone" class="w-full p-3 border border-gray-300 rounded-lg"></div>
+                        <div><label class="block text-gray-700 mb-1 text-sm">Admin Email</label><input id="editAdminEmail" type="email" class="w-full p-3 border border-gray-300 rounded-lg"></div>
+                    </div>
+                    <div class="border-t pt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div><label class="block text-gray-700 mb-1 text-sm">Hospital Logo</label><input id="editHospitalLogo" type="file" accept=".jpg,.jpeg,.png" class="w-full text-sm"></div>
+                        <div><label class="block text-gray-700 mb-1 text-sm">Main Hospital Photo</label><input id="editHospitalMainPhoto" type="file" accept=".jpg,.jpeg,.png" class="w-full text-sm"></div>
+                        <div><label class="block text-gray-700 mb-1 text-sm">Admin Photo</label><input id="editAdminPhoto" type="file" accept=".jpg,.jpeg,.png" class="w-full text-sm"></div>
+                    </div>
+                    <div class="flex gap-3 pt-2">
+                        <button id="saveAdminProfileBtn" type="submit" class="bg-cyan-600 text-white px-6 py-2.5 rounded-lg hover:bg-cyan-700">Save Changes</button>
+                        <button type="button" onclick="closeModal('adminProfileModal')" class="px-6 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Data embedded at render time — no globals mutated after this point
         const doctorsData = ${JSON.stringify(doctorsData)};
         const todaysAppointmentsData = ${JSON.stringify(appointmentsData)};
+        const adminProfileSeed = ${JSON.stringify(adminProfileSeed)};
 
         // ── Delete state ───────────────────────────────────────────────
         let pendingDeleteDoctorId   = null;
@@ -613,6 +668,60 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
             } finally {
                 button.disabled = false;
                 button.textContent = 'Save';
+            }
+        }
+
+        function openAdminProfileModal() {
+            document.getElementById('editHospitalName').value = adminProfileSeed.hospitalName || '';
+            document.getElementById('editHospitalType').value = adminProfileSeed.hospitalType || '';
+            document.getElementById('editHospitalCity').value = adminProfileSeed.hospitalCity || '';
+            document.getElementById('editHospitalPhone').value = adminProfileSeed.hospitalPhone || '';
+            document.getElementById('editHospitalEmail').value = adminProfileSeed.hospitalEmail || '';
+            document.getElementById('editAdminName').value = adminProfileSeed.adminName || '';
+            document.getElementById('editAdminDesignation').value = adminProfileSeed.adminDesignation || '';
+            document.getElementById('editAdminPhone').value = adminProfileSeed.adminPhone || '';
+            document.getElementById('editAdminEmail').value = adminProfileSeed.adminEmail || '';
+            document.getElementById('adminProfileModal').style.display = 'flex';
+        }
+
+        async function submitAdminProfileForm(event) {
+            event.preventDefault();
+            const btn = document.getElementById('saveAdminProfileBtn');
+            const original = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+            try {
+                const fd = new FormData();
+                fd.append('hospital_name', document.getElementById('editHospitalName').value.trim());
+                fd.append('hospital_type', document.getElementById('editHospitalType').value.trim());
+                fd.append('hospital_city', document.getElementById('editHospitalCity').value.trim());
+                fd.append('hospital_phone', document.getElementById('editHospitalPhone').value.trim());
+                fd.append('hospital_email', document.getElementById('editHospitalEmail').value.trim());
+                fd.append('admin_full_name', document.getElementById('editAdminName').value.trim());
+                fd.append('admin_position', document.getElementById('editAdminDesignation').value.trim());
+                fd.append('admin_phone', document.getElementById('editAdminPhone').value.trim());
+                fd.append('admin_email', document.getElementById('editAdminEmail').value.trim());
+
+                const logoFile = document.getElementById('editHospitalLogo').files?.[0];
+                const mainFile = document.getElementById('editHospitalMainPhoto').files?.[0];
+                const adminFile = document.getElementById('editAdminPhoto').files?.[0];
+                if (logoFile) fd.append('hospitalLogo', logoFile);
+                if (mainFile) fd.append('hospitalMainPhoto', mainFile);
+                if (adminFile) fd.append('adminPhoto', adminFile);
+
+                const res = await fetch('/api/admin/profile', { method: 'PUT', body: fd });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success) {
+                    throw new Error(data.error || data.message || 'Failed to update profile');
+                }
+                showToast('Profile updated successfully', 'success');
+                closeModal('adminProfileModal');
+                setTimeout(() => window.location.reload(), 900);
+            } catch (error) {
+                showToast(error.message || 'Could not update profile', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = original;
             }
         }
 
@@ -770,8 +879,26 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
             document.getElementById('leaveFromDate').value = today;
             document.getElementById('leaveToDate').min     = today;
             document.getElementById('leaveToDate').value   = tomorrow.toISOString().split('T')[0];
-            // Close modal on backdrop click
-            window.addEventListener('click', e => { if (e.target.classList.contains('modal')) e.target.style.display = 'none'; });
+            document.getElementById('adminProfileForm')?.addEventListener('submit', submitAdminProfileForm);
+            // Prevent accidental modal close while selecting/draggng text in modal content.
+            document.querySelectorAll('.modal .modal-content').forEach((contentEl) => {
+                contentEl.addEventListener('mousedown', (e) => e.stopPropagation());
+                contentEl.addEventListener('click', (e) => e.stopPropagation());
+            });
+
+            // Close modal only when mousedown + click both happen on backdrop.
+            window.addEventListener('mousedown', (e) => {
+                if (e.target.classList.contains('modal')) {
+                    e.target.dataset.backdropDown = '1';
+                }
+            });
+            window.addEventListener('click', (e) => {
+                if (!e.target.classList.contains('modal')) return;
+                if (e.target.dataset.backdropDown === '1') {
+                    e.target.style.display = 'none';
+                }
+                e.target.dataset.backdropDown = '0';
+            });
         });
     </script>
 </body>
@@ -799,15 +926,31 @@ module.exports = async function renderAdminDashboard(userId) {
     await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS visit_mode_policy VARCHAR(20) DEFAULT 'both'");
     await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS main_photo_filename TEXT");
     await query("ALTER TABLE hospital_admins ADD COLUMN IF NOT EXISTS photo_url TEXT");
+    await query(`
+      CREATE TABLE IF NOT EXISTS doctor_documents (
+        doc_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        doctor_id UUID NOT NULL REFERENCES doctors(doctor_id) ON DELETE CASCADE,
+        document_type VARCHAR(50) NOT NULL,
+        file_url TEXT NOT NULL,
+        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
     // Load all non-inactive doctors with their current leave (if any)
     const doctorsResult = await query(
-      `SELECT d.*, h.name as hospital_name,
+      `SELECT d.*, COALESCE(d.photo_url, dp.file_url) AS photo_url, h.name as hospital_name,
               dl.from_date as "leaveFrom",
               dl.to_date   as "leaveTo",
               dl.reason    as "leaveReason"
        FROM doctors d
        JOIN hospitals h ON d.hospital_id = h.hospital_id
+       LEFT JOIN LATERAL (
+           SELECT file_url
+           FROM doctor_documents
+           WHERE doctor_id = d.doctor_id AND document_type = 'profile_photo'
+           ORDER BY uploaded_at DESC
+           LIMIT 1
+       ) dp ON true
        LEFT JOIN LATERAL (
            SELECT from_date, to_date, reason
            FROM doctor_leave
@@ -843,7 +986,8 @@ module.exports = async function renderAdminDashboard(userId) {
     );
 
  const hospitalResult = await query(
-      `SELECT h.name, h.type, h.city, h.logo_filename, h.main_photo_filename, h.visit_mode_policy, ha.photo_url AS admin_photo_url
+      `SELECT h.name, h.type, h.city, h.phone, h.email, h.logo_filename, h.main_photo_filename, h.visit_mode_policy,
+              ha.photo_url AS admin_photo_url, ha.full_name AS admin_full_name, ha.position AS admin_position, ha.phone AS admin_phone, ha.email AS admin_email
        FROM hospitals h
        LEFT JOIN hospital_admins ha ON ha.hospital_id = h.hospital_id AND ha.user_id = $2
        WHERE h.hospital_id = $1`,
