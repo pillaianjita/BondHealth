@@ -610,7 +610,7 @@ app.post('/api/reports', authenticate, authorize('patient'), upload.single('repo
     let fileUrl = null;
     if (req.file) {
       // Move file from temp to reports folder
-      const reportsDir = path.join(__dirname, 'uploads', 'reports');
+      const reportsDir = path.join(UPLOADS_ROOT, 'reports');
       if (!fs.existsSync(reportsDir)) {
         fs.mkdirSync(reportsDir, { recursive: true });
       }
@@ -694,7 +694,6 @@ app.get('/api/reports', authenticate, async (req, res) => {
       result = await query(
         `SELECT r.* FROM lab_reports r
          WHERE r.patient_id = $1
-         AND r.shared_with IN ('patient', 'both')
          ORDER BY r.created_at DESC`,
         [patientId]
       );
@@ -1262,7 +1261,6 @@ app.get('/register-doctor', requireAuth('admin'), async (req, res) => {
 // Route: POST /api/hospitals/register
 
 // Use multer middleware for file uploads
-const multer = require('multer');
 const hospitalUpload = multer({ 
     storage: multer.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
@@ -1782,17 +1780,42 @@ app.get('/uploads/:folder/:file', (req, res) => {
 app.get('/api/reports/:reportId/download', authenticate, async (req, res) => {
     try {
         const result = await query(
-            'SELECT file_url, report_uuid, test_type FROM lab_reports WHERE report_uuid = $1',
+            `SELECT file_url, report_uuid, report_id, test_type, patient_id
+             FROM lab_reports
+             WHERE report_uuid = $1 OR report_id::text = $1
+             LIMIT 1`,
             [req.params.reportId]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Report not found' });
 
         const report = result.rows[0];
-        const fileName = report.file_url.split('/').pop();
-        const filePath = path.join(__dirname, 'uploads/reports', fileName);
+        if (req.user.role === 'patient') {
+            const patientResult = await query(
+                'SELECT patient_id FROM patients WHERE user_id = $1',
+                [req.user.id]
+            );
+            const patientId = patientResult.rows[0]?.patient_id;
+            if (!patientId || String(report.patient_id) !== String(patientId)) {
+                return res.status(403).json({ error: 'Not authorized to download this report' });
+            }
+        }
 
-        if (fs.existsSync(filePath)) res.download(filePath, `${report.test_type}_${report.report_uuid}.pdf`);
-        else res.status(404).json({ error: 'File not found on server' });
+        if (!report.file_url) {
+            return res.status(404).json({ error: 'No file attached to this report' });
+        }
+
+        const fileName = report.file_url.split('/').pop();
+        const possiblePaths = [
+            path.join(UPLOADS_ROOT, 'reports', fileName),
+            path.join(__dirname, 'uploads', 'reports', fileName)
+        ];
+        const filePath = possiblePaths.find(p => fs.existsSync(p));
+        if (!filePath) return res.status(404).json({ error: 'File not found on server' });
+
+        const extension = path.extname(filePath) || '.pdf';
+        const safeType = (report.test_type || 'report').replace(/[^a-z0-9_-]/gi, '_');
+        const safeId = report.report_uuid || report.report_id || req.params.reportId;
+        res.download(filePath, `${safeType}_${safeId}${extension}`);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -2119,29 +2142,6 @@ app.put('/api/appointments/:id', authenticate, authorize('doctor', 'admin'), asy
     }
 });
 
-app.get('/api/reports', authenticate, async (req, res) => {
-    try {
-        let result;
-        if (req.user.role === 'patient') {
-            result = await query(
-                `SELECT r.* FROM lab_reports r
-                 JOIN patients p ON r.patient_id = p.patient_id
-                 WHERE p.user_id = $1
-                 AND r.shared_with IN ('patient', 'both')
-                 ORDER BY r.created_at DESC`,
-                [req.user.id]
-            );
-        } else {
-            result = await query(
-                `SELECT r.*, p.full_name as patient_name FROM lab_reports r
-                 JOIN patients p ON r.patient_id = p.patient_id ORDER BY r.created_at DESC`
-            );
-        }
-        res.json(result.rows);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
 
 app.get('/api/prescriptions', authenticate, async (req, res) => {
     try {
@@ -2813,8 +2813,12 @@ app.get('/api/hospital/data', authenticate, async (req, res) => {
 });
 // Serve uploaded reports
 app.get('/uploads/reports/:file', (req, res) => {
-    const filePath = path.join(UPLOADS_ROOT, 'reports', req.params.file);
-    if (fs.existsSync(filePath)) res.sendFile(filePath);
+    const candidates = [
+      path.join(UPLOADS_ROOT, 'reports', req.params.file),
+      path.join(__dirname, 'uploads', 'reports', req.params.file)
+    ];
+    const filePath = candidates.find(p => fs.existsSync(p));
+    if (filePath) res.sendFile(filePath);
     else res.status(404).json({ error: 'File not found' });
 });
 
@@ -3705,8 +3709,31 @@ function generateHTML() {
 const server = http.createServer(app);
 chatServer.attach(server);                    // attaches Socket.IO
  
-server.listen(PORT, () => {
-    console.log(`   Home:    http://localhost:${PORT}/`);
-    console.log(`   Chat WS: ws://localhost:${PORT}/socket.io`);
-    console.log(`   Press Ctrl+C to stop`);
-});
+function startServer(port, maxRetries = 10) {
+    let attempts = 0;
+    let currentPort = port;
+
+    server.on('error', (error) => {
+        if (error.code === 'EADDRINUSE' && attempts < maxRetries) {
+            attempts += 1;
+            currentPort += 1;
+            console.warn(`Port ${currentPort - 1} is in use. Retrying on ${currentPort}...`);
+            return server.listen(currentPort);
+        }
+
+        console.error('Failed to start server:', error);
+        process.exit(1);
+    });
+
+    server.once('listening', () => {
+        const address = server.address();
+        const activePort = typeof address === 'object' && address ? address.port : currentPort;
+        console.log(`   Home:    http://localhost:${activePort}/`);
+        console.log(`   Chat WS: ws://localhost:${activePort}/socket.io`);
+        console.log(`   Press Ctrl+C to stop`);
+    });
+
+    server.listen(currentPort);
+}
+
+startServer(Number(PORT) || 3005);

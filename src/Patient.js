@@ -1236,7 +1236,30 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         let selectedFile = null;
         
         const reportsData = ${JSON.stringify(reports)};
+        let currentReports = [...reportsData];
         const prescriptionsData = ${JSON.stringify(prescriptions)};
+
+        function normalizeReport(report) {
+          const id = report?.id || report?.report_uuid || report?.report_id;
+          return {
+            id,
+            name: report?.name || report?.test_type || 'Medical Report',
+            date: report?.date || report?.test_date || report?.created_at || new Date().toISOString(),
+            results: report?.results || 'Results pending',
+            findings: report?.findings || report?.notes || 'No findings recorded',
+            file_url: report?.file_url || null
+          };
+        }
+
+        function getReportById(reportId) {
+          return currentReports.find(r => String(r.id) === String(reportId));
+        }
+
+        function getReportDownloadUrl(report) {
+          if (!report) return null;
+          if (report.id) return '/api/reports/' + encodeURIComponent(report.id) + '/download';
+          return report.file_url || null;
+        }
 
         document.addEventListener('DOMContentLoaded', function() {
           const menuItems = document.querySelectorAll('.menu-item');
@@ -2145,34 +2168,51 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
             
             if (response.ok) {
               const latestReports = await response.json();
+              currentReports = latestReports.map(normalizeReport);
               console.log('Reports received:', latestReports);
               console.log('Number of reports:', latestReports.length);
               
               const reportsContent = document.getElementById('reportsContent');
+              const reportsGridHtml = latestReports.length
+                ? \`
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    \${latestReports.map(report => {
+                      const reportId = report.report_uuid || report.report_id || '';
+                      return \`
+                      <div class="report-card white-card rounded-xl p-4 hover-lift">
+                        <div class="flex items-center justify-between mb-3">
+                          <div class="w-10 h-10 cyan-light rounded-lg flex items-center justify-center">
+                            <i class="fas \${report.test_type?.toLowerCase().includes('blood') ? 'fa-vial' : 'fa-x-ray'} cyan-text"></i>
+                          </div>
+                          <span class="text-xs cyan-dark text-white px-2 py-0.5 rounded-full">\${report.test_type}</span>
+                        </div>
+                        <h3 class="text-base font-semibold cyan-text mb-1">\${report.test_type}</h3>
+                        <p class="text-xs cyan-text opacity-75 mb-2">\${new Date(report.test_date).toLocaleDateString()}</p>
+                        <div class="flex justify-between">
+                          <button class="text-xs cyan-dark text-white px-3 py-1.5 rounded-lg" onclick="viewReport('\${reportId}')">
+                            <i class="fas fa-eye mr-1"></i>View
+                          </button>
+                          <button class="text-xs btn-white px-3 py-1.5 rounded-lg" onclick="downloadReport('\${reportId}')">
+                            <i class="fas fa-download mr-1"></i>Download
+                          </button>
+                        </div>
+                      </div>
+                    \`;
+                    }).join('')}
+                  </div>
+                \`
+                : \`
+                  <div class="white-card rounded-xl p-8 text-center">
+                    <div class="w-14 h-14 cyan-light rounded-full flex items-center justify-center mx-auto mb-3">
+                      <i class="fas fa-file-medical cyan-text text-xl"></i>
+                    </div>
+                    <h3 class="text-base font-semibold cyan-text mb-1">No reports available yet</h3>
+                    <p class="text-sm text-gray-500">Once doctors, labs, or you upload reports, they will appear here.</p>
+                  </div>
+                \`;
               reportsContent.innerHTML = \`
                 <h2 class="text-xl font-bold mb-4 cyan-text">Medical Reports</h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  \${latestReports.map(report => \`
-                    <div class="report-card white-card rounded-xl p-4 hover-lift">
-                      <div class="flex items-center justify-between mb-3">
-                        <div class="w-10 h-10 cyan-light rounded-lg flex items-center justify-center">
-                          <i class="fas \${report.test_type?.toLowerCase().includes('blood') ? 'fa-vial' : 'fa-x-ray'} cyan-text"></i>
-                        </div>
-                        <span class="text-xs cyan-dark text-white px-2 py-0.5 rounded-full">\${report.test_type}</span>
-                      </div>
-                      <h3 class="text-base font-semibold cyan-text mb-1">\${report.test_type}</h3>
-                      <p class="text-xs cyan-text opacity-75 mb-2">\${new Date(report.test_date).toLocaleDateString()}</p>
-                      <div class="flex justify-between">
-                        <button class="text-xs cyan-dark text-white px-3 py-1.5 rounded-lg" onclick="viewReport('\${report.report_uuid}')">
-                          <i class="fas fa-eye mr-1"></i>View
-                        </button>
-                        <button class="text-xs btn-white px-3 py-1.5 rounded-lg" onclick="downloadReport('\${report.report_uuid}')">
-                          <i class="fas fa-download mr-1"></i>Download
-                        </button>
-                      </div>
-                    </div>
-                  \`).join('')}
-                </div>
+                \${reportsGridHtml}
                 
                 <div class="mt-6 cyan-light rounded-xl p-4">
                   <h3 class="text-base font-semibold cyan-text mb-3">Upload New Report</h3>
@@ -2265,8 +2305,12 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         }
         
         function viewReport(reportId) {
-          const report = reportsData.find(r => r.id === reportId);
-          if (!report) return;
+          const report = getReportById(reportId);
+          if (!report) {
+            showToast('Error', 'Report details not found', 'error');
+            return;
+          }
+          const downloadUrl = getReportDownloadUrl(report);
           
           document.getElementById('reportModalTitle').textContent = report.name;
           document.getElementById('reportModalContent').innerHTML = \`
@@ -2289,6 +2333,11 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
                 <p class="text-xs cyan-text mb-1">Findings</p>
                 <p class="text-sm">\${report.findings}</p>
               </div>
+              \${downloadUrl ? \`
+                <a href="\${downloadUrl}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 cyan-dark text-white px-4 py-2 rounded-lg text-sm">
+                  <i class="fas fa-file-medical"></i>Open Attached Report
+                </a>
+              \` : ''}
             </div>
           \`;
           
@@ -2298,8 +2347,56 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         
         window.viewReport = viewReport;
         
-        function downloadReport(reportId) {
-          showToast('Download', 'Report download started', 'info');
+        async function downloadReport(reportId) {
+          const report = getReportById(reportId);
+          if (!report) {
+            showToast('Error', 'Report not found', 'error');
+            return;
+          }
+          
+          const downloadUrl = getReportDownloadUrl(report);
+          if (!downloadUrl) {
+            showToast('Error', 'No file available for this report', 'error');
+            return;
+          }
+          
+          try {
+            const response = await fetch(downloadUrl, { credentials: 'include' });
+            if (!response.ok) {
+              let message = 'Failed to download report';
+              try {
+                const err = await response.json();
+                message = err.error || message;
+              } catch (_) {}
+              showToast('Error', message, 'error');
+              return;
+            }
+
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json') || contentType.includes('text/html')) {
+              showToast('Error', 'Downloaded response is not a valid report file', 'error');
+              return;
+            }
+
+            const blob = await response.blob();
+            const contentDisposition = response.headers.get('content-disposition') || '';
+            const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+            const fallbackName = report.name ? (report.name + '_report') : 'medical_report';
+            const fileName = filenameMatch?.[1] || fallbackName;
+
+            const blobUrl = URL.createObjectURL(blob);
+            const downloadLink = document.createElement('a');
+            downloadLink.href = blobUrl;
+            downloadLink.download = fileName;
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+            URL.revokeObjectURL(blobUrl);
+            showToast('Download', 'Report download started', 'info');
+          } catch (error) {
+            console.error('Report download failed:', error);
+            showToast('Error', 'Network error while downloading report', 'error');
+          }
         }
         
         window.downloadReport = downloadReport;
