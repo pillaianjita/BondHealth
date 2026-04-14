@@ -698,7 +698,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
         function openAdminProfileModal() {
             const splitIntlPhone = (value) => {
                 const raw = String(value || '').trim();
-                const match = raw.match(/^(\+\d{1,4})\s*(.*)$/);
+                const match = raw.match(/^(\\+\\d{1,4})\\s*(.*)$/);
                 if (match) return { code: match[1], number: match[2].replace(/\D/g, '') };
                 return { code: '+91', number: raw.replace(/\D/g, '') };
             };
@@ -735,11 +735,11 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
                 const adminPhoneDigits = document.getElementById('editAdminPhone').value.replace(/\D/g, '');
                 const hospitalPhoneCode = document.getElementById('editHospitalPhoneCode').value || '+91';
                 const adminPhoneCode = document.getElementById('editAdminPhoneCode').value || '+91';
-                fd.append('hospital_phone', hospitalPhoneDigits ? `${hospitalPhoneCode}${hospitalPhoneDigits}` : '');
+                fd.append('hospital_phone', hospitalPhoneDigits ? (hospitalPhoneCode + hospitalPhoneDigits) : '');
                 fd.append('hospital_email', document.getElementById('editHospitalEmail').value.trim());
                 fd.append('admin_full_name', document.getElementById('editAdminName').value.trim());
                 fd.append('admin_position', document.getElementById('editAdminDesignation').value.trim());
-                fd.append('admin_phone', adminPhoneDigits ? `${adminPhoneCode}${adminPhoneDigits}` : '');
+                fd.append('admin_phone', adminPhoneDigits ? (adminPhoneCode + adminPhoneDigits) : '');
                 fd.append('admin_email', document.getElementById('editAdminEmail').value.trim());
 
                 const logoFile = document.getElementById('editHospitalLogo').files?.[0];

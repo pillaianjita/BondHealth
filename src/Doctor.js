@@ -1388,7 +1388,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('logoutFromProfileBtn')?.addEventListener('click', () => { closeModal('profileModal'); openModal('logoutConfirmModal'); });
   const parseIntlPhoneValue = (value) => {
     const raw = String(value || '').trim();
-    const match = raw.match(/^(\+\d{1,4})\s*(.*)$/);
+    const match = raw.match(/^(\\+\\d{1,4})\\s*(.*)$/);
     if (match) return { code: match[1], number: match[2].replace(/\D/g, '') };
     return { code: '+91', number: raw.replace(/\D/g, '') };
   };
@@ -1433,7 +1433,7 @@ document.addEventListener('DOMContentLoaded', () => {
       contact:          (() => {
         const code = document.getElementById('editContactCode')?.value || '+91';
         const digits = (document.getElementById('editContact')?.value || '').replace(/\D/g, '');
-        return digits ? `${code}${digits}` : '';
+        return digits ? (code + digits) : '';
       })(),
       consultation_fee: document.getElementById('editFee').value.trim(),
       available_days:   document.getElementById('editDays').value.trim(),
@@ -1725,7 +1725,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/doctor/prescription/create', {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
-          patient_id: document.getElementById('prescriptionPatientId').value,
+          patientId: document.getElementById('prescriptionPatientId').value,
           diagnosis, medications,
           notes: document.getElementById('prescriptionNotes').value.trim()
         })
@@ -1744,7 +1744,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const intlPhone = (codeId, numberId) => {
     const code = document.getElementById(codeId)?.value || '+91';
     const digits = normalizePhoneDigits(document.getElementById(numberId)?.value || '');
-    return digits ? `${code}${digits}` : '';
+    return digits ? (code + digits) : '';
   };
   ['newPatientPhone', 'newPatientEmergencyPhone'].forEach((id) => {
     const el = document.getElementById(id);

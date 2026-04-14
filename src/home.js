@@ -1545,6 +1545,10 @@ function looksLikePhoneLogin(value) {
     return /^\+?[0-9][0-9\s\-()]{7,}$/.test(String(value || '').trim());
 }
 
+function looksLikeEmailLogin(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
 async function resolvePasswordResetUser(loginId) {
     const normalizedLogin = String(loginId || '').trim();
     if (!normalizedLogin) return null;
@@ -1724,15 +1728,34 @@ async function issuePasswordResetOtp(loginId, isResend = false) {
         [user.user_id, hashOtp(otpCode), expiresAt]
     );
 
-    const canUseEmail = !!user.email;
-    const emailDelivery = canUseEmail ? await sendPasswordResetOtpEmail(user.email, otpCode) : { mode: 'console-unavailable' };
-    let delivery = emailDelivery;
+    const requestedEmail = looksLikeEmailLogin(normalizedLogin) ? normalizedLogin.toLowerCase() : '';
+    const requestedPhoneDigits = looksLikePhoneLogin(normalizedLogin) ? normalizePhoneDigits(normalizedLogin) : '';
+    const userPhoneDigits = normalizePhoneDigits(user.phone || '');
+    const requestedPhoneMatchesUser = !!requestedPhoneDigits && !!userPhoneDigits && userPhoneDigits.endsWith(requestedPhoneDigits.slice(-10));
+    const requestedEmailMatchesUser = !!requestedEmail && !!user.email && String(user.email).toLowerCase() === requestedEmail;
 
-    // If no email channel, and login matched by phone (or phone exists), try SMS
-    if (emailDelivery.mode !== 'smtp') {
-        const smsDelivery = await sendPasswordResetOtpSms(user.phone, otpCode);
-        if (smsDelivery.mode === 'sms') {
-            delivery = smsDelivery;
+    const sendPriority = [];
+    if (requestedEmailMatchesUser) sendPriority.push({ channel: 'email', target: user.email });
+    if (requestedPhoneMatchesUser) sendPriority.push({ channel: 'sms', target: user.phone });
+    if (!sendPriority.some(p => p.channel === 'email') && user.email) sendPriority.push({ channel: 'email', target: user.email });
+    if (!sendPriority.some(p => p.channel === 'sms') && user.phone) sendPriority.push({ channel: 'sms', target: user.phone });
+
+    let delivery = { mode: 'console-unavailable' };
+    for (const candidate of sendPriority) {
+        if (candidate.channel === 'email') {
+            const emailDelivery = await sendPasswordResetOtpEmail(candidate.target, otpCode);
+            if (emailDelivery.mode === 'smtp') {
+                delivery = emailDelivery;
+                delivery.sent_to = candidate.target;
+                break;
+            }
+        } else if (candidate.channel === 'sms') {
+            const smsDelivery = await sendPasswordResetOtpSms(candidate.target, otpCode);
+            if (smsDelivery.mode === 'sms') {
+                delivery = smsDelivery;
+                delivery.sent_to = candidate.target;
+                break;
+            }
         }
     }
 
@@ -1774,7 +1797,8 @@ async function issuePasswordResetOtp(loginId, isResend = false) {
             message: deliveryMessage,
             email: user.email || null,
             phone: user.phone || null,
-            channel: delivery.mode === 'sms' ? 'sms' : 'email'
+            channel: delivery.mode === 'sms' ? 'sms' : 'email',
+            sent_to: delivery.sent_to || null
         }
     };
 }
@@ -3017,6 +3041,16 @@ app.get('/api/prescriptions', authenticate, async (req, res) => {
                  WHERE pt.user_id = $1 AND p.status = 'active' ORDER BY p.created_at DESC`,
                 [req.user.id]
             );
+        } else if (req.user.role === 'doctor') {
+            result = await query(
+                `SELECT p.* FROM prescriptions p
+                 JOIN doctors d ON p.doctor_id = d.doctor_id
+                 WHERE d.user_id = $1
+                 ORDER BY p.created_at DESC`,
+                [req.user.id]
+            );
+        } else {
+            result = { rows: [] };
         }
         res.json(result.rows);
     } catch (error) {
@@ -3777,7 +3811,16 @@ app.post('/api/doctor/prescription/create', authenticate, authorize('doctor'), a
     const client = await getClient();
     try {
         await client.query('BEGIN');
-        const { patientId, diagnosis, medications, notes } = req.body;
+        const patientId = req.body.patientId || req.body.patient_id;
+        const { diagnosis, medications, notes } = req.body;
+        if (!patientId) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'patientId is required' });
+        }
+        if (!Array.isArray(medications) || medications.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'At least one medication is required' });
+        }
         const doctorRes = await client.query(
             'SELECT doctor_id FROM doctors WHERE user_id = $1', [req.user.id]
         );
@@ -3786,13 +3829,23 @@ app.post('/api/doctor/prescription/create', authenticate, authorize('doctor'), a
             return res.status(404).json({ error: 'Doctor not found' });
         }
         const doctorId = doctorRes.rows[0].doctor_id;
+        const patientExists = await client.query('SELECT 1 FROM patients WHERE patient_id = $1 LIMIT 1', [patientId]);
+        if (!patientExists.rows[0]) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Patient not found' });
+        }
         const presc = [];
         for (const med of medications) {
+            if (!med?.name) continue;
             const row = await client.query(
                 'INSERT INTO prescriptions (patient_id, doctor_id, medicine_name, dosage, frequency, instructions, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
                 [patientId, doctorId, med.name, med.dosage, med.frequency, notes, 'active']
             );
             presc.push(row.rows[0]);
+        }
+        if (presc.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'No valid medications were provided' });
         }
         await client.query('COMMIT');
         res.json({ success: true, message: 'Prescriptions created', data: presc });
@@ -3801,6 +3854,100 @@ app.post('/api/doctor/prescription/create', authenticate, authorize('doctor'), a
         res.status(500).json({ error: error.message });
     } finally {
         client.release();
+    }
+});
+
+async function ensureMedicineOrdersTable() {
+    await query(`
+      CREATE TABLE IF NOT EXISTS medicine_orders (
+        order_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        patient_id UUID REFERENCES patients(patient_id),
+        prescription_id UUID REFERENCES prescriptions(prescription_id),
+        medicine_id UUID REFERENCES medicines(medicine_id),
+        quantity INTEGER NOT NULL,
+        order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status VARCHAR(50) DEFAULT 'processing',
+        delivery_address TEXT,
+        payment_status VARCHAR(50) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query('ALTER TABLE medicine_orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)');
+}
+
+app.post('/api/patient/medicine-orders', authenticate, authorize('patient'), async (req, res) => {
+    const client = await getClient();
+    try {
+        await ensureMedicineOrdersTable();
+        await client.query('BEGIN');
+        const patientResult = await client.query('SELECT patient_id FROM patients WHERE user_id = $1 LIMIT 1', [req.user.id]);
+        const patientId = patientResult.rows[0]?.patient_id;
+        if (!patientId) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: 'Patient profile not found' });
+        }
+
+        const prescriptionId = req.body.prescription_id || req.body.prescriptionId;
+        const quantity = Number(req.body.quantity);
+        const deliveryAddress = String(req.body.delivery_address || req.body.address || '').trim();
+        const paymentMethod = String(req.body.payment_method || req.body.payment || '').trim();
+
+        if (!prescriptionId || !quantity || quantity < 1 || !deliveryAddress || !paymentMethod) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ success: false, message: 'Prescription, quantity, address, and payment method are required' });
+        }
+
+        const prescriptionResult = await client.query(
+            `SELECT prescription_id FROM prescriptions
+             WHERE prescription_id = $1 AND patient_id = $2 AND status = 'active' LIMIT 1`,
+            [prescriptionId, patientId]
+        );
+        if (!prescriptionResult.rows[0]) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: 'Prescription not found for this patient' });
+        }
+
+        const orderResult = await client.query(
+            `INSERT INTO medicine_orders
+             (patient_id, prescription_id, quantity, delivery_address, payment_method, payment_status, status)
+             VALUES ($1, $2, $3, $4, $5, 'pending', 'processing')
+             RETURNING *`,
+            [patientId, prescriptionId, quantity, deliveryAddress, paymentMethod]
+        );
+
+        await client.query('COMMIT');
+        res.json({ success: true, message: 'Medicine order placed successfully', order: orderResult.rows[0] });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ success: false, message: error.message || 'Failed to place medicine order' });
+    } finally {
+        client.release();
+    }
+});
+
+app.get('/api/patient/medicine-orders', authenticate, authorize('patient'), async (req, res) => {
+    try {
+        await ensureMedicineOrdersTable();
+        const patientResult = await query('SELECT patient_id FROM patients WHERE user_id = $1 LIMIT 1', [req.user.id]);
+        const patientId = patientResult.rows[0]?.patient_id;
+        if (!patientId) {
+            return res.status(404).json({ success: false, message: 'Patient profile not found' });
+        }
+
+        const ordersResult = await query(
+            `SELECT mo.order_id, mo.quantity, mo.status, mo.payment_status, mo.payment_method,
+                    mo.delivery_address, mo.order_date, mo.created_at,
+                    p.prescription_id, p.medicine_name, p.dosage, p.frequency
+             FROM medicine_orders mo
+             LEFT JOIN prescriptions p ON p.prescription_id = mo.prescription_id
+             WHERE mo.patient_id = $1
+             ORDER BY mo.created_at DESC`,
+            [patientId]
+        );
+
+        res.json({ success: true, orders: ordersResult.rows });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message || 'Failed to fetch medicine orders' });
     }
 });
 
@@ -5039,12 +5186,12 @@ async function generateHTML() {
    <section id="hospitals" class="py-20 bg-gradient-to-b from-gray-50 to-white">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
      <div class="text-center mb-12"><h2 class="text-3xl md:text-4xl font-bold text-[#1a365d] mb-4">Frequently Visited Hospitals</h2><p class="text-gray-600 max-w-2xl mx-auto">Top registered hospitals by activity</p></div>
-     ${showHospitalControls ? `<div class="flex justify-center gap-3 mb-4">
-       <button id="hospitalPrevBtn" class="px-3 py-1.5 rounded-lg border border-cyan-400 text-cyan-700 hover:bg-cyan-50">Prev</button>
-       <button id="hospitalNextBtn" class="px-3 py-1.5 rounded-lg border border-cyan-400 text-cyan-700 hover:bg-cyan-50">Next</button>
-     </div>` : ''}
+     <div class="relative">
+      ${showHospitalControls ? `<button id="hospitalPrevBtn" class="absolute left-[-16px] top-1/2 -translate-y-1/2 z-10 w-11 h-11 rounded-full bg-white/95 text-cyan-700 shadow-lg border border-cyan-100 hover:bg-cyan-50 transition-all" aria-label="Previous hospitals">‹</button>` : ''}
+      ${showHospitalControls ? `<button id="hospitalNextBtn" class="absolute right-[-16px] top-1/2 -translate-y-1/2 z-10 w-11 h-11 rounded-full bg-white/95 text-cyan-700 shadow-lg border border-cyan-100 hover:bg-cyan-50 transition-all" aria-label="Next hospitals">›</button>` : ''}
      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
       ${frequentlyVisitedHospitalsHtml || '<div class="col-span-4 text-center py-10 text-gray-500">No registered hospitals yet.</div>'}
+     </div>
      </div>
     </div>
    </section>
@@ -5335,8 +5482,12 @@ async function generateHTML() {
     if (allHospitalItems.length > 4) {
       let hospitalOffset = 0;
       const redrawHospitalSlides = () => {
+        const visibleIndexes = new Set();
+        for (let i = 0; i < 4; i++) {
+          visibleIndexes.add((hospitalOffset + i) % allHospitalItems.length);
+        }
         allHospitalItems.forEach((el, idx) => {
-          el.classList.toggle('hidden', idx < hospitalOffset || idx >= hospitalOffset + 4);
+          el.classList.toggle('hidden', !visibleIndexes.has(idx));
         });
       };
       const prevBtn = document.getElementById('hospitalPrevBtn');
@@ -5349,6 +5500,7 @@ async function generateHTML() {
         hospitalOffset = (hospitalOffset + 4) % allHospitalItems.length;
         redrawHospitalSlides();
       });
+      redrawHospitalSlides();
     }
     onConfigChange(config);
   </script>

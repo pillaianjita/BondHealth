@@ -1758,7 +1758,7 @@ successMessage.style.display = 'block';
                 contactNo:          (() => {
                     const code = document.getElementById('contactNoCode').value || '+91';
                     const number = document.getElementById('contactNo').value.replace(/[^0-9]/g, '');
-                    return number ? `${code}${number}` : '';
+                    return number ? (code + number) : '';
                 })(),
                 officialEmail:      document.getElementById('officialEmail').value,
                 adminName:          document.getElementById('adminName').value,

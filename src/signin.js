@@ -354,6 +354,7 @@ const SIGNIN_TEMPLATE = `<!doctype html>
     const fpResendRow = document.getElementById('fpResendRow');
     const fpResetBtn = document.getElementById('fpResetBtn');
     let fpBackdropMouseDown = false;
+    let fpIgnoreBackdropUntil = 0;
     let fpStep = 'request';
 
     function setFpStatus(msg, type) {
@@ -363,10 +364,15 @@ const SIGNIN_TEMPLATE = `<!doctype html>
 
     function openForgotModal(prefill = '') {
       fpModal.classList.add('show');
+      fpIgnoreBackdropUntil = Date.now() + 250;
       fpLoginId.value = prefill || '';
       fpOtp.value = '';
       fpNewPassword.value = '';
       fpConfirmPassword.value = '';
+      fpLoginId.disabled = false;
+      fpOtp.disabled = false;
+      document.getElementById('fpSendOtpBtn').disabled = false;
+      document.getElementById('fpVerifyOtpBtn').disabled = false;
       fpStep = 'request';
       fpOtpRow.style.display = 'none';
       fpNewPasswordRow.style.display = 'none';
@@ -411,6 +417,7 @@ const SIGNIN_TEMPLATE = `<!doctype html>
     fpModal.addEventListener('mouseup', e => {
       // Close only when both mouse down and up happened on backdrop.
       // This prevents accidental close while selecting text in the card.
+      if (Date.now() < fpIgnoreBackdropUntil) return;
       if (fpBackdropMouseDown && e.target === fpModal) closeForgotModal();
       fpBackdropMouseDown = false;
     });
@@ -422,7 +429,8 @@ const SIGNIN_TEMPLATE = `<!doctype html>
       try {
         const data = await fpPost('/api/auth/forgot-password/request', { loginId });
         const devOtpHint = data?.dev_otp ? (' OTP (dev mode): ' + data.dev_otp) : '';
-        setFpStatus((data?.message || 'OTP sent to your registered email') + devOtpHint, 'success');
+        const sentToHint = data?.sent_to ? (' Sent to: ' + data.sent_to) : '';
+        setFpStatus((data?.message || 'OTP sent successfully') + sentToHint + devOtpHint, 'success');
         fpStep = 'otp';
         fpOtpRow.style.display = 'block';
         fpVerifyRow.style.display = 'flex';
@@ -441,7 +449,8 @@ const SIGNIN_TEMPLATE = `<!doctype html>
       try {
         const data = await fpPost('/api/auth/forgot-password/resend', { loginId });
         const devOtpHint = data?.dev_otp ? (' OTP (dev mode): ' + data.dev_otp) : '';
-        setFpStatus((data?.message || 'OTP resent successfully') + devOtpHint, 'success');
+        const sentToHint = data?.sent_to ? (' Sent to: ' + data.sent_to) : '';
+        setFpStatus((data?.message || 'OTP resent successfully') + sentToHint + devOtpHint, 'success');
       } catch (err) {
         setFpStatus(err.message, 'error');
       }
@@ -479,7 +488,7 @@ const SIGNIN_TEMPLATE = `<!doctype html>
         await fpPost('/api/auth/forgot-password/reset', { loginId, otp, newPassword, confirmPassword });
         setFpStatus('Password reset successful. Please sign in.', 'success');
         showMessage('Password reset successful. Please sign in with new password.', 'success');
-        setTimeout(closeForgotModal, 900);
+        setTimeout(closeForgotModal, 1400);
       } catch (err) {
         setFpStatus(err.message, 'error');
       }

@@ -1868,7 +1868,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
 
           const parsePhoneValue = (value) => {
             const raw = String(value || '').trim();
-            const match = raw.match(/^(\+\d{1,4})\s*(.*)$/);
+            const match = raw.match(/^(\\+\\d{1,4})\\s*(.*)$/);
             if (match) {
               return { code: match[1], number: match[2].replace(/\D/g, '') };
             }
@@ -1877,7 +1877,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
           const composePhoneValue = (codeElId, phoneElId) => {
             const code = document.getElementById(codeElId)?.value || '+91';
             const number = (document.getElementById(phoneElId)?.value || '').replace(/\D/g, '');
-            return number ? `${code}${number}` : '';
+            return number ? (code + number) : '';
           };
           const bindIntlPhoneInput = (codeElId, phoneElId, initialValue) => {
             const parsed = parsePhoneValue(initialValue);
@@ -2258,15 +2258,43 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
               showToast('Error', 'Please fill all fields', 'error');
               return;
             }
-            
-            showToast('Success', 'Order placed successfully!', 'success');
-            orderMedicinesModal.classList.add('hidden');
-            
-            // In a real app, you would send the order to server here
-            
-            setTimeout(() => {
-              window.location.reload();
-            }, 1500);
+
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const previousLabel = submitBtn ? submitBtn.textContent : '';
+            if (submitBtn) {
+              submitBtn.disabled = true;
+              submitBtn.textContent = 'Placing Order...';
+            }
+
+            try {
+              const response = await fetch('/api/patient/medicine-orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  prescription_id: prescription,
+                  quantity: Number(quantity),
+                  delivery_address: address.trim(),
+                  payment_method: payment
+                })
+              });
+              const data = await response.json().catch(() => ({}));
+              if (!response.ok || !data.success) {
+                throw new Error(data.message || 'Failed to place order');
+              }
+
+              showToast('Success', data.message || 'Order placed successfully!', 'success');
+              orderMedicinesModal.classList.add('hidden');
+              this.reset();
+              document.getElementById('orderQuantity').value = '1';
+              setTimeout(() => window.location.reload(), 1200);
+            } catch (error) {
+              showToast('Error', error.message || 'Failed to place order', 'error');
+            } finally {
+              if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = previousLabel || 'Place Order';
+              }
+            }
           });
         });
         
@@ -2920,6 +2948,36 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         
         async function loadPrescriptionsContent() {
           const prescriptionsContent = document.getElementById('prescriptionsContent');
+          let orders = [];
+          try {
+            const ordersRes = await fetch('/api/patient/medicine-orders');
+            const ordersData = await ordersRes.json().catch(() => ({}));
+            if (ordersRes.ok && ordersData.success && Array.isArray(ordersData.orders)) {
+              orders = ordersData.orders;
+            }
+          } catch (error) {
+            console.error('Error fetching medicine order history:', error);
+          }
+          const orderHistoryHtml = orders.length
+            ? orders.map(order => {
+                const statusClass = order.status === 'delivered' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
+                const medicine = escapeHtmlText(order.medicine_name || 'Medicine');
+                const status = escapeHtmlText(order.status || 'processing');
+                const qty = escapeHtmlText(order.quantity || 0);
+                const dosage = escapeHtmlText(order.dosage || 'As prescribed');
+                const frequency = escapeHtmlText(order.frequency || 'N/A');
+                const orderedAt = escapeHtmlText(new Date(order.created_at || order.order_date).toLocaleString());
+                const payment = escapeHtmlText(order.payment_method || 'N/A');
+                return '<div class="border border-gray-200 rounded-lg p-3">' +
+                  '<div class="flex items-center justify-between">' +
+                    '<p class="font-semibold cyan-text text-sm">' + medicine + '</p>' +
+                    '<span class="text-xs px-2 py-1 rounded-full ' + statusClass + '">' + status + '</span>' +
+                  '</div>' +
+                  '<p class="text-xs text-gray-600 mt-1">Qty: ' + qty + ' | ' + dosage + ' | ' + frequency + '</p>' +
+                  '<p class="text-xs text-gray-500 mt-1">Ordered: ' + orderedAt + ' | Payment: ' + payment + '</p>' +
+                '</div>';
+              }).join('')
+            : '<p class="text-sm text-gray-500">No medicine orders yet.</p>';
           prescriptionsContent.innerHTML = \`
             <h2 class="text-xl font-bold mb-4 cyan-text">Active Prescriptions</h2>
             <div class="space-y-4">
@@ -2979,6 +3037,16 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
                 <p><i class="fas fa-truck mr-2 cyan-text"></i>Free home delivery on orders above $50</p>
                 <p><i class="fas fa-clock mr-2 cyan-text"></i>24/7 pharmacist support</p>
                 <p><i class="fas fa-shield-alt mr-2 cyan-text"></i>100% authentic medicines guaranteed</p>
+              </div>
+            </div>
+
+            <div class="mt-6 white-card rounded-xl p-4 border border-cyan-100">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-base font-semibold cyan-text">Order History</h3>
+                <span class="text-xs px-2 py-1 rounded-full cyan-dark text-white">${orders.length} orders</span>
+              </div>
+              <div class="space-y-3">
+                ${orderHistoryHtml}
               </div>
             </div>
           \`;

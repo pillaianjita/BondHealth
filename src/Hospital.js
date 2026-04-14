@@ -2543,7 +2543,7 @@ function getAddDoctorHTML() {
             formData.append('speciality', document.getElementById('speciality').value);
             const phoneCode = document.getElementById('phoneCountryCode').value || '+91';
             const phoneDigits = document.getElementById('phoneNumber').value.replace(/\D/g, '');
-            formData.append('phone', phoneDigits ? `${phoneCode}${phoneDigits}` : '');
+            formData.append('phone', phoneDigits ? (phoneCode + phoneDigits) : '');
             formData.append('dateOfBirth', document.getElementById('dateOfBirth').value);
             formData.append('education', document.getElementById('educationQualification').value);
             formData.append('medicalCouncil', document.getElementById('medicalCouncil').value);
