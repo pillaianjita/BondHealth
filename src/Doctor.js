@@ -1020,7 +1020,8 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const res  = await fetch('/api/doctor/appointments/today');
       if (!res.ok) throw new Error('Server error ' + res.status);
-      const data = await res.json();
+      const payload = await res.json();
+      const data = Array.isArray(payload) ? payload : (payload.appointments || []);
       document.getElementById('sidebarApptCount').textContent = data.length;
       document.getElementById('statAppointments').textContent = data.length;
       document.getElementById('summaryConfirmed').textContent = data.filter(a => a.status === 'confirmed').length;
@@ -1034,6 +1035,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   document.getElementById('refreshAppointmentsBtn')?.addEventListener('click', refreshAppointments);
+
+  async function checkDueOnlineReminders() {
+    try {
+      const res = await fetch('/api/doctor/reminders/due');
+      if (!res.ok) return;
+      const reminders = await res.json();
+      if (!Array.isArray(reminders) || reminders.length === 0) return;
+      reminders.forEach(rem => {
+        const patientName = rem.patient_name || 'Patient';
+        const apptTime = rem.appointment_time ? String(rem.appointment_time).substring(0,5) : '--:--';
+        showToast('Online Appointment Reminder', patientName + ' has an online appointment now (' + apptTime + ')', 'warning');
+      });
+    } catch (e) {
+      console.error('checkDueOnlineReminders error:', e);
+    }
+  }
 
   function renderAppointments(list) {
     const el = document.getElementById('appointmentsList');
@@ -1849,8 +1866,14 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch(e) { console.error('stats refresh error:', e); }
   }, 60000);
 
+  checkDueOnlineReminders();
+  const reminderInterval = setInterval(checkDueOnlineReminders, 30000);
+
   // Clear interval on page unload to prevent leaks
-  window.addEventListener('beforeunload', () => clearInterval(statsInterval));
+  window.addEventListener('beforeunload', () => {
+    clearInterval(statsInterval);
+    clearInterval(reminderInterval);
+  });
 
   // ─── Welcome toast ────────────────────────────────
   setTimeout(() => showToast('Welcome', 'Good day, ${esc(doctorData.name)}!', 'success'), 800);

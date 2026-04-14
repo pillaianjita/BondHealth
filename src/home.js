@@ -2301,7 +2301,7 @@ app.get('/api/appointments', authenticate, async (req, res) => {
             );
         } else if (req.user.role === 'doctor') {
             result = await query(
-                `SELECT a.*, p.full_name as patient_name
+                `SELECT a.*, a.type AS appointment_type, p.full_name as patient_name
                  FROM appointments a
                  JOIN patients p ON a.patient_id = p.patient_id
                  JOIN doctors d ON a.doctor_id = d.doctor_id
@@ -2374,9 +2374,52 @@ function parseAppointmentDateTime(appointmentDate, appointmentTime) {
     return new Date(`${datePart}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`);
 }
 
+async function ensureHospitalVisitPolicySchema() {
+    await query(
+        "ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS visit_mode_policy VARCHAR(20) DEFAULT 'both'"
+    );
+}
+
+async function ensureOnlineReminderSchema() {
+    await query(`
+      CREATE TABLE IF NOT EXISTS online_appointment_reminders (
+        reminder_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        appointment_id UUID UNIQUE NOT NULL,
+        doctor_id UUID NOT NULL,
+        remind_at TIMESTAMP NOT NULL,
+        delivered_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+}
+
 app.post('/api/appointments', authenticate, authorize('patient'), async (req, res) => {
     try {
         const { doctor_id, appointment_date, appointment_time, reason, type, location } = req.body;
+        const appointmentType = String(type || 'in-person').trim().toLowerCase();
+        if (!['in-person', 'online'].includes(appointmentType)) {
+            return res.status(400).json({ success: false, message: 'Invalid appointment type' });
+        }
+
+        await ensureHospitalVisitPolicySchema();
+        const policyResult = await query(
+            `SELECT COALESCE(h.visit_mode_policy, 'both') AS visit_mode_policy
+             FROM doctors d
+             JOIN hospitals h ON h.hospital_id = d.hospital_id
+             WHERE d.doctor_id = $1`,
+            [doctor_id]
+        );
+        if (!policyResult.rows[0]) {
+            return res.status(404).json({ success: false, message: 'Doctor not found' });
+        }
+        const visitModePolicy = String(policyResult.rows[0].visit_mode_policy || 'both').toLowerCase();
+        if (visitModePolicy === 'in-person-only' && appointmentType === 'online') {
+            return res.status(400).json({
+                success: false,
+                message: 'This hospital currently allows only in-person appointments.'
+            });
+        }
+
         const bookingDateTime = parseAppointmentDateTime(appointment_date, appointment_time);
         if (!bookingDateTime || bookingDateTime.getTime() < Date.now()) {
             return res.status(400).json({
@@ -2408,8 +2451,25 @@ app.post('/api/appointments', authenticate, authorize('patient'), async (req, re
         const result = await query(
             `INSERT INTO appointments (patient_id, doctor_id, hospital_id, appointment_date, appointment_time, reason, type, location, status)
              VALUES ($1, $2, (SELECT hospital_id FROM doctors WHERE doctor_id = $2), $3, $4, $5, $6, $7, 'confirmed') RETURNING *`,
-            [patientResult.rows[0].patient_id, doctor_id, appointment_date, appointment_time, reason, type, location]
+            [
+                patientResult.rows[0].patient_id,
+                doctor_id,
+                appointment_date,
+                appointment_time,
+                reason,
+                appointmentType,
+                location
+            ]
         );
+        if (appointmentType === 'online' && result.rows[0]?.appointment_id) {
+            await ensureOnlineReminderSchema();
+            await query(
+                `INSERT INTO online_appointment_reminders (appointment_id, doctor_id, remind_at)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (appointment_id) DO NOTHING`,
+                [result.rows[0].appointment_id, doctor_id, bookingDateTime]
+            );
+        }
         res.status(201).json(result.rows[0]);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -2675,7 +2735,7 @@ app.post('/api/doctor/profile/update', authenticate, authorize('doctor'), async 
 app.get('/api/doctor/appointments/today', authenticate, authorize('doctor'), async (req, res) => {
     try {
         const result = await query(
-            `SELECT a.*, p.full_name as patient_name, p.patient_uuid, p.patient_id
+            `SELECT a.*, a.type AS appointment_type, p.full_name as patient_name, p.patient_uuid, p.patient_id
              FROM appointments a
              JOIN patients p ON a.patient_id = p.patient_id
              JOIN doctors d ON a.doctor_id = d.doctor_id
@@ -2684,6 +2744,100 @@ app.get('/api/doctor/appointments/today', authenticate, authorize('doctor'), asy
             [req.user.id]
         );
         res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/doctor/reminders/due', authenticate, authorize('doctor'), async (req, res) => {
+    try {
+        await ensureOnlineReminderSchema();
+        const doctorResult = await query('SELECT doctor_id FROM doctors WHERE user_id = $1', [req.user.id]);
+        const doctorId = doctorResult.rows[0]?.doctor_id;
+        if (!doctorId) return res.json([]);
+
+        const dueResult = await query(
+            `SELECT r.reminder_id, r.appointment_id, p.full_name AS patient_name,
+                    a.appointment_date, a.appointment_time, a.type AS appointment_type
+             FROM online_appointment_reminders r
+             JOIN appointments a ON a.appointment_id = r.appointment_id
+             JOIN patients p ON p.patient_id = a.patient_id
+             WHERE r.doctor_id = $1
+               AND r.delivered_at IS NULL
+               AND r.remind_at <= NOW()
+               AND COALESCE(a.status, '') NOT IN ('cancelled', 'deleted')
+               AND COALESCE(a.type, '') = 'online'
+             ORDER BY r.remind_at ASC
+             LIMIT 10`,
+            [doctorId]
+        );
+
+        if (dueResult.rows.length > 0) {
+            const ids = dueResult.rows.map(r => r.reminder_id);
+            await query(
+                `UPDATE online_appointment_reminders
+                 SET delivered_at = NOW()
+                 WHERE reminder_id = ANY($1::uuid[])`,
+                [ids]
+            );
+        }
+
+        res.json(dueResult.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/hospital/visit-policy', authenticate, async (req, res) => {
+    try {
+        await ensureHospitalVisitPolicySchema();
+        const { doctor_id } = req.query;
+        if (!doctor_id) return res.status(400).json({ error: 'doctor_id is required' });
+        const result = await query(
+            `SELECT COALESCE(h.visit_mode_policy, 'both') AS visit_mode_policy
+             FROM doctors d
+             JOIN hospitals h ON h.hospital_id = d.hospital_id
+             WHERE d.doctor_id = $1`,
+            [doctor_id]
+        );
+        if (!result.rows[0]) return res.status(404).json({ error: 'Doctor/hospital not found' });
+        res.json({ visit_mode_policy: result.rows[0].visit_mode_policy });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/admin/hospital/visit-policy', authenticate, authorize('admin'), async (req, res) => {
+    try {
+        await ensureHospitalVisitPolicySchema();
+        const adminResult = await query('SELECT hospital_id FROM hospital_admins WHERE user_id = $1', [req.user.id]);
+        const hospitalId = adminResult.rows[0]?.hospital_id;
+        if (!hospitalId) return res.status(404).json({ error: 'Hospital not found for admin' });
+        const hospitalResult = await query(
+            "SELECT COALESCE(visit_mode_policy, 'both') AS visit_mode_policy FROM hospitals WHERE hospital_id = $1",
+            [hospitalId]
+        );
+        res.json({ visit_mode_policy: hospitalResult.rows[0]?.visit_mode_policy || 'both' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/admin/hospital/visit-policy', authenticate, authorize('admin'), async (req, res) => {
+    try {
+        await ensureHospitalVisitPolicySchema();
+        const nextPolicy = String(req.body.visit_mode_policy || '').trim().toLowerCase();
+        if (!['both', 'in-person-only'].includes(nextPolicy)) {
+            return res.status(400).json({ error: 'visit_mode_policy must be either both or in-person-only' });
+        }
+        const adminResult = await query('SELECT hospital_id FROM hospital_admins WHERE user_id = $1', [req.user.id]);
+        const hospitalId = adminResult.rows[0]?.hospital_id;
+        if (!hospitalId) return res.status(404).json({ error: 'Hospital not found for admin' });
+        const updateResult = await query(
+            'UPDATE hospitals SET visit_mode_policy = $1 WHERE hospital_id = $2 RETURNING visit_mode_policy',
+            [nextPolicy, hospitalId]
+        );
+        res.json({ success: true, visit_mode_policy: updateResult.rows[0]?.visit_mode_policy || nextPolicy });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

@@ -1190,6 +1190,19 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
                 <label class="block text-sm font-medium cyan-text mb-2">Select Date</label>
                 <input type="date" id="appointmentDate" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500">
               </div>
+
+              <div class="mb-4">
+                <label class="block text-sm font-medium cyan-text mb-2">Visit Mode</label>
+                <div id="visitModeChooser" class="grid grid-cols-2 gap-2">
+                  <button type="button" class="visit-mode-btn px-3 py-2 text-sm border border-gray-200 rounded-xl hover:border-cyan-500 hover:bg-cyan-50 transition" data-mode="in-person">
+                    <i class="fas fa-hospital mr-1"></i>In-person
+                  </button>
+                  <button type="button" class="visit-mode-btn px-3 py-2 text-sm border border-gray-200 rounded-xl hover:border-cyan-500 hover:bg-cyan-50 transition" data-mode="online">
+                    <i class="fas fa-video mr-1"></i>Online
+                  </button>
+                </div>
+                <p id="visitModeHint" class="text-xs text-gray-500 mt-2"></p>
+              </div>
               
               <div class="mb-6">
                 <label class="block text-sm font-medium cyan-text mb-2">Select Time Slot</label>
@@ -1498,6 +1511,8 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         let selectedDoctor = null;
         let selectedDate = '';
         let selectedTime = '';
+        let selectedVisitMode = 'in-person';
+        let hospitalVisitPolicy = 'both';
         let currentFilter = 'all';
         let searchQuery = '';
         
@@ -1538,6 +1553,42 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
           if (!report) return null;
           if (report.id) return '/api/reports/' + encodeURIComponent(report.id) + '/download';
           return report.file_view_url || report.file_url || null;
+        }
+
+        async function loadHospitalVisitPolicy(doctorId) {
+          hospitalVisitPolicy = 'both';
+          selectedVisitMode = 'in-person';
+          const hintEl = document.getElementById('visitModeHint');
+          const modeButtons = document.querySelectorAll('#visitModeChooser .visit-mode-btn');
+          modeButtons.forEach(btn => {
+            btn.disabled = false;
+            btn.classList.remove('opacity-40', 'cursor-not-allowed', 'selected', 'cyan-dark', 'text-white', 'border-cyan-500');
+          });
+
+          try {
+            const response = await fetch('/api/hospital/visit-policy?doctor_id=' + encodeURIComponent(doctorId));
+            if (response.ok) {
+              const data = await response.json();
+              hospitalVisitPolicy = String(data.visit_mode_policy || 'both').toLowerCase();
+            }
+          } catch (err) {
+            console.error('Error loading hospital visit policy:', err);
+          }
+
+          const inPersonBtn = document.querySelector('#visitModeChooser .visit-mode-btn[data-mode="in-person"]');
+          const onlineBtn = document.querySelector('#visitModeChooser .visit-mode-btn[data-mode="online"]');
+          if (hospitalVisitPolicy === 'in-person-only' && onlineBtn) {
+            onlineBtn.disabled = true;
+            onlineBtn.classList.add('opacity-40', 'cursor-not-allowed');
+            hintEl.textContent = 'This hospital currently allows only in-person appointments.';
+            selectedVisitMode = 'in-person';
+          } else {
+            hintEl.textContent = 'You can choose in-person or online consultation.';
+          }
+
+          if (inPersonBtn) {
+            inPersonBtn.classList.add('selected', 'cyan-dark', 'text-white', 'border-cyan-500');
+          }
         }
 
         function getReportViewUrl(report) {
@@ -1819,6 +1870,18 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
                 s.classList.remove('selected');
               });
               slot.classList.add('selected');
+              updateConfirmButton();
+            });
+          });
+
+          document.querySelectorAll('#visitModeChooser .visit-mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+              if (btn.disabled) return;
+              selectedVisitMode = btn.dataset.mode || 'in-person';
+              document.querySelectorAll('#visitModeChooser .visit-mode-btn').forEach(b => {
+                b.classList.remove('selected', 'cyan-dark', 'text-white', 'border-cyan-500');
+              });
+              btn.classList.add('selected', 'cyan-dark', 'text-white', 'border-cyan-500');
               updateConfirmButton();
             });
           });
@@ -2263,7 +2326,9 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
 
           selectedDate = '';
           selectedTime = '';
+          selectedVisitMode = 'in-person';
           resetTimeSlots([]);                          // reset with no booked info yet
+          loadHospitalVisitPolicy(doctorId);
           document.getElementById('visitReason').value = '';
           document.getElementById('confirmBooking').disabled = true;
           modal.classList.remove('hidden');
@@ -2330,7 +2395,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
           selectedDate = dateInput.value;
           selectedTime = timeSlot ? timeSlot.dataset.time : '';
 
-          btn.disabled = !selectedDate || !selectedTime;
+          btn.disabled = !selectedDate || !selectedTime || !selectedVisitMode;
         }
         
         function updateRescheduleConfirmButton() {
@@ -2362,8 +2427,8 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
                 appointment_date: selectedDate,
                 appointment_time: selectedTime,
                 reason: reason || 'General consultation',
-                type: 'in-person',
-                location: selectedDoctor.hospital_name
+                type: selectedVisitMode,
+                location: selectedVisitMode === 'online' ? 'Online consultation' : selectedDoctor.hospital_name
               })
             });
             

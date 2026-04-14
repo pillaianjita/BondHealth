@@ -57,6 +57,7 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
     ? `/uploads/hospitals/logos/${hospitalData.logo_filename}`
     : '';
   const adminPhotoUrl = hospitalData.admin_photo_url || '';
+  const visitModePolicy = hospitalData.visit_mode_policy || 'both';
 
   return `
 <!DOCTYPE html>
@@ -191,6 +192,24 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
                     <div class="stats-card p-6"><div class="flex items-center justify-between"><div><p class="text-gray-500">Today's Appointments</p><h3 class="text-2xl font-bold text-purple-600">${appointmentsData.length}</h3></div><div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center"><i class="fas fa-calendar-check text-purple-600 text-xl"></i></div></div></div>
                     <div class="stats-card p-6"><div class="flex items-center justify-between"><div><p class="text-gray-500">Doctors on Leave</p><h3 class="text-2xl font-bold text-amber-600">${doctorsData.filter(d => d.status === 'On Leave').length}</h3></div><div class="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center"><i class="fas fa-umbrella-beach text-amber-600 text-xl"></i></div></div></div>
                     <div class="stats-card p-6"><div class="flex items-center justify-between"><div><p class="text-gray-500">Total Staff</p><h3 class="text-2xl font-bold text-blue-600">${doctorsData.length}</h3></div><div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center"><i class="fas fa-users text-blue-600 text-xl"></i></div></div></div>
+                </div>
+
+                <div class="bg-white rounded-lg border border-gray-200 p-5 mb-8">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                        <div>
+                            <h3 class="text-base font-bold text-gray-800 mb-1"><i class="fas fa-sliders-h text-cyan-600 mr-2"></i>Appointment Visit Mode Policy</h3>
+                            <p class="text-sm text-gray-500">Control whether patients can book only in-person visits or both in-person and online.</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <select id="visitPolicySelect" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                <option value="both" ${visitModePolicy === 'both' ? 'selected' : ''}>Allow Both (In-person + Online)</option>
+                                <option value="in-person-only" ${visitModePolicy === 'in-person-only' ? 'selected' : ''}>In-person Only</option>
+                            </select>
+                            <button id="saveVisitPolicyBtn" onclick="saveVisitPolicy()" class="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-cyan-700 transition-colors">
+                                Save
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Available Doctors -->
@@ -572,6 +591,31 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
                 .catch(() => window.location.href = '/');
         }
 
+        async function saveVisitPolicy() {
+            const select = document.getElementById('visitPolicySelect');
+            const button = document.getElementById('saveVisitPolicyBtn');
+            const visit_mode_policy = select.value;
+            button.disabled = true;
+            button.textContent = 'Saving...';
+            try {
+                const res = await fetch('/api/admin/hospital/visit-policy', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ visit_mode_policy })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success) {
+                    throw new Error(data.error || data.message || 'Failed to save visit policy');
+                }
+                showToast('Visit mode policy updated successfully');
+            } catch (error) {
+                showToast(error.message || 'Could not update visit policy', 'error');
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Save';
+            }
+        }
+
         // ── Doctor schedule modal ──────────────────────────────────────
         function showDoctorSchedule(doctorId) {
             const doctor = doctorsData.find(d => d.doctor_id === doctorId);
@@ -752,6 +796,9 @@ module.exports = async function renderAdminDashboard(userId) {
     }
 
     const { hospital_id: hospitalId, hospital_name: hospitalName } = row;
+    await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS visit_mode_policy VARCHAR(20) DEFAULT 'both'");
+    await query("ALTER TABLE hospitals ADD COLUMN IF NOT EXISTS main_photo_filename TEXT");
+    await query("ALTER TABLE hospital_admins ADD COLUMN IF NOT EXISTS photo_url TEXT");
 
     // Load all non-inactive doctors with their current leave (if any)
     const doctorsResult = await query(
@@ -796,7 +843,7 @@ module.exports = async function renderAdminDashboard(userId) {
     );
 
  const hospitalResult = await query(
-      `SELECT h.name, h.type, h.city, h.logo_filename, h.main_photo_filename, ha.photo_url AS admin_photo_url
+      `SELECT h.name, h.type, h.city, h.logo_filename, h.main_photo_filename, h.visit_mode_policy, ha.photo_url AS admin_photo_url
        FROM hospitals h
        LEFT JOIN hospital_admins ha ON ha.hospital_id = h.hospital_id AND ha.user_id = $2
        WHERE h.hospital_id = $1`,
