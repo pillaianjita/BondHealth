@@ -1771,8 +1771,13 @@ app.get('/api/lab/check-patient-hospital', authenticate, authorize('lab'), async
 
 // Serve uploaded files
 app.get('/uploads/:folder/:file', (req, res) => {
-    const filePath = path.join(__dirname, 'uploads', req.params.folder, req.params.file);
-    if (fs.existsSync(filePath)) res.sendFile(filePath);
+    const { folder, file } = req.params;
+    const candidates = [
+      path.join(UPLOADS_ROOT, folder, file),
+      path.join(__dirname, 'uploads', folder, file)
+    ];
+    const filePath = candidates.find(p => fs.existsSync(p));
+    if (filePath) res.sendFile(filePath);
     else res.status(404).json({ error: 'File not found' });
 });
 
@@ -2204,6 +2209,14 @@ app.get('/api/doctor', authenticate, authorize('doctor'), async (req, res) => {
 // Update doctor profile
 app.put('/api/doctor', authenticate, authorize('doctor'), async (req, res) => {
     try {
+        const normalizedAvailableDays = Array.isArray(req.body.available_days)
+            ? (req.body.available_days.length ? req.body.available_days : null)
+            : (typeof req.body.available_days === 'string'
+                ? (req.body.available_days.trim()
+                    ? req.body.available_days.split(',').map(day => day.trim()).filter(Boolean)
+                    : null)
+                : null);
+
         const result = await query(
             `UPDATE doctors
              SET full_name = COALESCE($1, full_name), designation = COALESCE($2, designation),
@@ -2211,7 +2224,7 @@ app.put('/api/doctor', authenticate, authorize('doctor'), async (req, res) => {
                  available_time = COALESCE($5, available_time), phone = COALESCE($6, phone), address = COALESCE($7, address)
              WHERE user_id = $8 RETURNING *`,
             [req.body.full_name, req.body.designation, req.body.consultation_fee,
-             req.body.available_days, req.body.available_time, req.body.phone, req.body.address, req.user.id]
+             normalizedAvailableDays, req.body.available_time, req.body.phone, req.body.address, req.user.id]
         );
         res.json(result.rows[0]);
     } catch (error) {
@@ -2224,6 +2237,15 @@ app.post('/api/doctor/profile/update', authenticate, authorize('doctor'), async 
     try {
         const { full_name, designation, specialization, experience, qualification,
                 email, contact, consultation_fee, available_days, available_time, address } = req.body;
+
+        const normalizedAvailableDays = Array.isArray(available_days)
+            ? (available_days.length ? available_days : null)
+            : (typeof available_days === 'string'
+                ? (available_days.trim()
+                    ? available_days.split(',').map(day => day.trim()).filter(Boolean)
+                    : null)
+                : null);
+
         // Update doctors table
         const result = await query(
             `UPDATE doctors
@@ -2239,7 +2261,7 @@ app.post('/api/doctor/profile/update', authenticate, authorize('doctor'), async 
                  address           = COALESCE($10, address)
              WHERE user_id = $11 RETURNING *`,
             [full_name, designation, specialization, experience, qualification,
-             contact, consultation_fee, available_days, available_time, address, req.user.id]
+             contact, consultation_fee, normalizedAvailableDays, available_time, address, req.user.id]
         );
         // Update email in users table if provided
         if (email) {
@@ -2317,10 +2339,23 @@ app.get('/api/patients', authenticate, authorize('doctor'), async (req, res) => 
                         THEN EXTRACT(YEAR FROM AGE(CURRENT_DATE, p.date_of_birth))::int
                         ELSE NULL
                     END AS age,
-                    a.appointment_date AS last_visit
+                    last_seen.last_visit,
+                    next_upcoming.next_visit
              FROM patients p
              JOIN appointments a ON p.patient_id = a.patient_id
              JOIN doctors d ON a.doctor_id = d.doctor_id
+             LEFT JOIN (
+                SELECT patient_id, doctor_id, MAX(appointment_date) AS last_visit
+                FROM appointments
+                WHERE appointment_date <= CURRENT_DATE
+                GROUP BY patient_id, doctor_id
+             ) last_seen ON last_seen.patient_id = p.patient_id AND last_seen.doctor_id = d.doctor_id
+             LEFT JOIN (
+                SELECT patient_id, doctor_id, MIN(appointment_date) AS next_visit
+                FROM appointments
+                WHERE appointment_date > CURRENT_DATE
+                GROUP BY patient_id, doctor_id
+             ) next_upcoming ON next_upcoming.patient_id = p.patient_id AND next_upcoming.doctor_id = d.doctor_id
              WHERE d.user_id = $1
              ORDER BY p.patient_id, a.appointment_date DESC`,
             [req.user.id]
@@ -2747,8 +2782,13 @@ app.delete('/api/doctor/profile/photo', authenticate, authorize('doctor'), async
         const { doctor_id, photo_url } = doctorRes.rows[0];
         // Delete file from disk if it exists
         if (photo_url) {
-            const filePath = path.join(__dirname, photo_url);
-            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            const fileName = photo_url.split('/').pop();
+            const possiblePaths = [
+                path.join(UPLOADS_ROOT, 'photos', fileName),
+                path.join(__dirname, 'uploads', 'photos', fileName)
+            ];
+            const filePath = possiblePaths.find(p => fs.existsSync(p));
+            if (filePath) fs.unlinkSync(filePath);
         }
         await query('UPDATE doctors SET photo_url = NULL WHERE doctor_id = $1', [doctor_id]);
         res.json({ success: true });
@@ -2835,6 +2875,17 @@ app.get('/uploads/reports/:file', (req, res) => {
     const filePath = candidates.find(p => fs.existsSync(p));
     if (filePath) res.sendFile(filePath);
     else res.status(404).json({ error: 'File not found' });
+});
+
+// Serve doctor profile photos
+app.get('/uploads/photos/:file', (req, res) => {
+    const candidates = [
+      path.join(UPLOADS_ROOT, 'photos', req.params.file),
+      path.join(__dirname, 'uploads', 'photos', req.params.file)
+    ];
+    const filePath = candidates.find(p => fs.existsSync(p));
+    if (filePath) res.sendFile(filePath);
+    else res.status(404).json({ error: 'Photo not found' });
 });
 
 // Serve hospital logos

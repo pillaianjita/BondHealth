@@ -150,6 +150,9 @@ function buildReportCardHTML(r) {
 }
 
 function buildPatientCardHTML(p) {
+  const lastVisitText = p.last_visit
+    ? new Date(p.last_visit).toLocaleDateString()
+    : (p.next_visit ? 'Yet to visit' : 'N/A');
   return `
     <div class="cyan-light rounded-xl p-5 hover-lift patient-card" data-id="${esc(p.patient_id)}">
       <div class="flex items-center space-x-4 mb-4">
@@ -169,7 +172,7 @@ function buildPatientCardHTML(p) {
         </div>
         <div class="flex justify-between">
           <span class="cyan-text opacity-75">Last Visit:</span>
-          <span class="cyan-text">${p.last_visit ? new Date(p.last_visit).toLocaleDateString() : 'N/A'}</span>
+          <span class="cyan-text">${esc(lastVisitText)}</span>
         </div>
       </div>
       <div class="flex items-center justify-between pt-3 border-t border-gray-200">
@@ -1840,10 +1843,13 @@ module.exports = async function renderDoctorDashboard(userId) {
             THEN EXTRACT(YEAR FROM AGE(CURRENT_DATE, p.date_of_birth))::int
             ELSE NULL
           END AS age,
-           sub.last_visit
+           sub.last_visit,
+           sub.next_visit
          FROM patients p
          JOIN (
-           SELECT patient_id, MAX(appointment_date) AS last_visit
+          SELECT patient_id,
+                 MAX(CASE WHEN appointment_date <= CURRENT_DATE THEN appointment_date END) AS last_visit,
+                 MIN(CASE WHEN appointment_date > CURRENT_DATE THEN appointment_date END) AS next_visit
            FROM appointments
            WHERE doctor_id = $1
            GROUP BY patient_id
