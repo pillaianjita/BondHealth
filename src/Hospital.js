@@ -1,11 +1,8 @@
 //Hospital.js
 
-const PORT = process.env.PORT || 3000;
-const express = require('express');
-const app = express();
+
 const { query, getClient } = require('./db/config');  // ← ONLY this line
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
 // Data storage (simulating localStorage on server)
 /*const server = http.createServer((req, res) => {
   // Set CORS headers
@@ -13,7 +10,7 @@ app.use(express.urlencoded({ extended: true }));
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Handle OPTIONS preflight requests
+  
   if (req.method === 'OPTIONS') {
     res.writeHead(200);
     res.end();
@@ -174,29 +171,29 @@ app.use(express.urlencoded({ extended: true }));
 const path = require('path');
 
 // Add this route to handle redirects from registration
-app.get('/', async (req, res) => {
-    try {
-        // Check if this is a new registration redirect
-        const hospitalData = await module.exports.renderHospitalDashboard();
-        res.send(hospitalData);
-    } catch (error) {
-        console.error('Error loading dashboard:', error);
-        res.status(500).send('Error loading dashboard');
-    }
-});
+// app.get('/', async (req, res) => {
+//     try {
+//         // Check if this is a new registration redirect
+//         const hospitalData = await module.exports.renderHospitalDashboard();
+//         res.send(hospitalData);
+//     } catch (error) {
+//         console.error('Error loading dashboard:', error);
+//         res.status(500).send('Error loading dashboard');
+//     }
+// });
 
-// Add this route to handle the dashboard display
-app.get('/dashboard', async (req, res) => {
-    try {
-        // You can pass hospital ID as query parameter
-        // For now, just render the dashboard
-        const html = await module.exports.renderHospitalDashboard();
-        res.send(html);
-    } catch (error) {
-        console.error('Error loading dashboard:', error);
-        res.status(500).send('Error loading dashboard');
-    }
-});
+// // Add this route to handle the dashboard display
+// app.get('/dashboard', async (req, res) => {
+//     try {
+//         // You can pass hospital ID as query parameter
+//         // For now, just render the dashboard
+//         const html = await module.exports.renderHospitalDashboard();
+//         res.send(html);
+//     } catch (error) {
+//         console.error('Error loading dashboard:', error);
+//         res.status(500).send('Error loading dashboard');
+//     }
+// });
 
 // HTML Template Functions
 function getMainDashboardHTML(hospitalData = null, doctors = [], medicines = [], labs = []) {
@@ -2222,7 +2219,7 @@ function getAddDoctorHTML() {
                         <span>Click to upload profile photo</span>
                         <div class="file-info">Accepted: JPG, PNG (Max: 5MB)</div>
                     </label>
-                    <input type="file" id="doctorImage" name="doctorImage" accept="image/*" required>
+                    <input type="file" id="doctorImage" name="doctorImage" accept="image/*">
                     <div class="file-preview" id="imagePreview"></div>
                 </div>
             </div>
@@ -2253,7 +2250,7 @@ function getAddDoctorHTML() {
                         <span>Upload Qualification Certificate</span>
                         <div class="file-info">Accepted: PDF, JPG, PNG (Max: 10MB)</div>
                     </label>
-                    <input type="file" id="qualificationCertificate" name="qualificationCertificate" accept=".pdf,image/*" required>
+                    <input type="file" id="qualificationCertificate" name="qualificationCertificate" accept=".pdf,image/*">
                     <div class="file-preview" id="qualificationPreview"></div>
                 </div>
             </div>
@@ -2288,7 +2285,7 @@ function getAddDoctorHTML() {
                             <span>Upload Specialization Certificate</span>
                             <div class="file-info">Accepted: PDF, JPG, PNG (Max: 10MB)</div>
                         </label>
-                        <input type="file" id="specializationCertificate" name="specializationCertificate" accept=".pdf,image/*" required>
+                        <input type="file" id="specializationCertificate" name="specializationCertificate" accept=".pdf,image/*">
                         <div class="file-preview" id="specializationPreview"></div>
                     </div>
                 </div>
@@ -2323,7 +2320,7 @@ function getAddDoctorHTML() {
                         <span>Upload ID Document</span>
                         <div class="file-info">Accepted: PDF, JPG, PNG (Max: 10MB)</div>
                     </label>
-                    <input type="file" id="govtIdDocument" name="govtIdDocument" accept=".pdf,image/*" required>
+                    <input type="file" id="govtIdDocument" name="govtIdDocument" accept=".pdf,image/*">
                     <div class="file-preview" id="govtIdPreview"></div>
                 </div>
             </div>
@@ -2368,7 +2365,7 @@ function getAddDoctorHTML() {
                         <span>Upload Appointment Letter</span>
                         <div class="file-info">Accepted: PDF, JPG, PNG (Max: 10MB)</div>
                     </label>
-                    <input type="file" id="appointmentLetter" name="appointmentLetter" accept=".pdf,image/*" required>
+                    <input type="file" id="appointmentLetter" name="appointmentLetter" accept=".pdf,image/*">
                     <div class="file-preview" id="appointmentPreview"></div>
                 </div>
             </div>
@@ -2410,193 +2407,160 @@ function getAddDoctorHTML() {
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const fileInputs = {
-                doctorImage: 'imagePreview',
-                qualificationCertificate: 'qualificationPreview',
-                specializationCertificate: 'specializationPreview',
-                govtIdDocument: 'govtIdPreview',
-                appointmentLetter: 'appointmentPreview'
-            };
+        // File preview functionality
+        const fileConfigs = [
+            { inputId: 'doctorImage', previewId: 'imagePreview', maxMB: 5, types: ['image/jpeg','image/jpg','image/png'] },
+            { inputId: 'qualificationCertificate', previewId: 'qualificationPreview', maxMB: 10, types: ['application/pdf','image/jpeg','image/jpg','image/png'] },
+            { inputId: 'specializationCertificate', previewId: 'specializationPreview', maxMB: 10, types: ['application/pdf','image/jpeg','image/jpg','image/png'] },
+            { inputId: 'govtIdDocument', previewId: 'govtIdPreview', maxMB: 10, types: ['application/pdf','image/jpeg','image/jpg','image/png'] },
+            { inputId: 'appointmentLetter', previewId: 'appointmentPreview', maxMB: 10, types: ['application/pdf','image/jpeg','image/jpg','image/png'] }
+        ];
 
-            Object.keys(fileInputs).forEach(inputId => {
-                const input = document.getElementById(inputId);
-                const preview = document.getElementById(fileInputs[inputId]);
-                if (!input || !preview) return;
+        fileConfigs.forEach(cfg => {
+            const input = document.getElementById(cfg.inputId);
+            const preview = document.getElementById(cfg.previewId);
+            if (!input || !preview) return;
 
-                input.addEventListener('change', function() {
-                    if (this.files && this.files[0]) {
-                        const file = this.files[0];
-                        const fileSize = (file.size / (1024 * 1024)).toFixed(2);
-
-                        const maxSize = inputId === 'doctorImage' ? 5 : 10;
-
-                        if (fileSize > maxSize) {
-                            alert(\`File size exceeds \${maxSize}MB limit. Please upload a smaller file.\`);
-                            this.value = '';
-                            preview.style.display = 'none';
-                            return;
-                        }
-
-                        const validExtensions = inputId === 'doctorImage' ?
-                            ['.jpg', '.jpeg', '.png'] :
-                            ['.pdf', '.jpg', '.jpeg', '.png'];
-
-                        const fileName = file.name.toLowerCase();
-                        const isValidExtension = validExtensions.some(ext => fileName.endsWith(ext));
-
-                        if (!isValidExtension) {
-                            alert(\`Invalid file type. Please upload: \${validExtensions.join(', ')}\`);
-                            this.value = '';
-                            preview.style.display = 'none';
-                            return;
-                        }
-
-                        preview.textContent = \`Selected: \${file.name} (\${fileSize} MB)\`;
-                        preview.style.display = 'block';
-                        preview.className = 'file-preview success';
-                    } else {
-                        preview.style.display = 'none';
-                    }
-                });
+            input.addEventListener('change', function() {
+                if (!this.files || !this.files[0]) {
+                    preview.style.display = 'none';
+                    preview.textContent = '';
+                    return;
+                }
+                const file = this.files[0];
+                
+                if (file.size > cfg.maxMB * 1024 * 1024) {
+                    alert('File too large. Max ' + cfg.maxMB + 'MB allowed.');
+                    this.value = '';
+                    preview.style.display = 'none';
+                    return;
+                }
+                if (!cfg.types.includes(file.type)) {
+                    alert('Invalid file type. Allowed: ' + cfg.types.join(', '));
+                    this.value = '';
+                    preview.style.display = 'none';
+                    return;
+                }
+                
+                preview.textContent = 'Selected: ' + file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)';
+                preview.style.display = 'block';
+                preview.className = 'file-preview success';
             });
         });
         
+        // Date constraints
         const today = new Date();
         const maxDate = new Date(today.getFullYear() - 24, today.getMonth(), today.getDate());
         document.getElementById('dateOfBirth').max = maxDate.toISOString().split('T')[0];
-        
         document.getElementById('appointmentDate').min = new Date().toISOString().split('T')[0];
         
+        // Form submission - Using FormData for file upload
         document.getElementById('doctorForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
+            // Validate required fields
             const requiredFields = this.querySelectorAll('[required]');
             let allValid = true;
             
             requiredFields.forEach(field => {
-                if (!field.value) {
-                    field.style.borderColor = '#f44336';
-                    allValid = false;
-                } else {
-                    field.style.borderColor = '#e3f2fd';
-                }
-            });
-            
-            const checkboxes = [
-                'dataConsent',
-                'declarationConsent',
-                'verificationConsent'
-            ];
-            
-            checkboxes.forEach(checkboxId => {
-                const checkbox = document.getElementById(checkboxId);
-                if (!checkbox.checked) {
-                    checkbox.parentElement.style.color = '#f44336';
-                    allValid = false;
-                } else {
-                    checkbox.parentElement.style.color = '';
+                if (field.type === 'checkbox') {
+                    if (!field.checked) {
+                        field.parentElement.style.color = '#f44336';
+                        allValid = false;
+                    } else {
+                        field.parentElement.style.color = '';
+                    }
+                } else if (field.type !== 'file') {
+                    if (!field.value.trim()) {
+                        field.style.borderColor = '#f44336';
+                        allValid = false;
+                    } else {
+                        field.style.borderColor = '#e3f2fd';
+                    }
                 }
             });
             
             if (!allValid) {
-                alert('Please fill all required fields and accept all declarations.');
+                alert('Please fill all required fields.');
                 return;
             }
             
-            const formData = {
-                name: document.getElementById('fullName').value,
-                email: document.getElementById('doctorEmail').value,
-                speciality: document.getElementById('speciality').value,
-                phone: document.getElementById('phoneNumber').value,
-                dateOfBirth: document.getElementById('dateOfBirth').value,
-                education: document.getElementById('educationQualification').value,
-                medicalCouncil: document.getElementById('medicalCouncil').value,
-                registrationNumber: document.getElementById('registrationNumber').value,
-                idType: document.getElementById('idType').value,
-                idNumber: document.getElementById('govtIdNumber').value,
-                appointmentDate: document.getElementById('appointmentDate').value,
-                designation: document.getElementById('designation').value,
-                password: document.getElementById('doctorPassword').value,  // ← ADD THIS
-                registeredOn: new Date().toISOString(),
-                status: 'active'
-            };
+            // Create FormData for file upload
+            const formData = new FormData();
+            formData.append('name', document.getElementById('fullName').value);
+            formData.append('email', document.getElementById('doctorEmail').value);
+            formData.append('speciality', document.getElementById('speciality').value);
+            formData.append('phone', document.getElementById('phoneNumber').value);
+            formData.append('dateOfBirth', document.getElementById('dateOfBirth').value);
+            formData.append('education', document.getElementById('educationQualification').value);
+            formData.append('medicalCouncil', document.getElementById('medicalCouncil').value);
+            formData.append('registrationNumber', document.getElementById('registrationNumber').value);
+            formData.append('idType', document.getElementById('idType').value);
+            formData.append('idNumber', document.getElementById('govtIdNumber').value);
+            formData.append('appointmentDate', document.getElementById('appointmentDate').value);
+            formData.append('designation', document.getElementById('designation').value);
+            formData.append('password', document.getElementById('doctorPassword').value);
+            
+            // Append files
+            const fileInputs = ['doctorImage', 'qualificationCertificate', 'specializationCertificate', 'govtIdDocument', 'appointmentLetter'];
+            fileInputs.forEach(inputId => {
+                const fileInput = document.getElementById(inputId);
+                if (fileInput.files && fileInput.files[0]) {
+                    formData.append(inputId, fileInput.files[0]);
+                }
+            });
+            
+            const btn = document.querySelector('.btn-submit');
+            const originalHTML = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Registering...';
             
             try {
                 const response = await fetch('/api/hospital/add/doctor', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(formData)
+                    credentials: 'include',
+                    body: formData
                 });
                 
-                if (response.ok) {
-                    const result = await response.json();
+                const result = await response.json();
+                console.log('Response:', result);
+                
+                if (response.ok && result.success) {
                     const pwd = result.initialPassword || document.getElementById('doctorPassword').value;
                     const email = document.getElementById('doctorEmail').value;
                     alert(
-                        '✅ Doctor registered successfully!\n\n' +
-                        '📋 Please share these login credentials with the doctor:\n' +
-                        '   Email:    ' + email + '\n' +
-                        '   Password: ' + pwd + '\n\n' +
-                        '⚠️  Ask the doctor to change their password after first login.'
+                        '✅ Doctor registered successfully!\\n\\n' +
+                        '📋 Share these credentials with the doctor:\\n' +
+                        '   Email:    ' + email + '\\n' +
+                        '   Password: ' + pwd + '\\n\\n' +
+                        '⚠️  Ask them to change the password on first login.'
                     );
                     this.reset();
-                    
-                    Object.values(fileInputs).forEach(previewId => {
-                        document.getElementById(previewId).style.display = 'none';
+                    document.querySelectorAll('.file-preview').forEach(el => {
+                        el.style.display = 'none';
+                        el.textContent = '';
                     });
-                    
                     setTimeout(() => {
                         window.location.href = '/admin-dashboard';
-                    }, 2000);
+                    }, 1500);
                 } else {
-                    alert('Failed to register doctor. Please try again.');
+                    alert('❌ ' + (result.error || result.message || 'Registration failed.'));
+                    btn.disabled = false;
+                    btn.innerHTML = originalHTML;
                 }
             } catch (error) {
-                console.error('Error:', error);
-                alert('Failed to register doctor. Please check your connection.');
+                console.error('Submit error:', error);
+                alert('❌ Network error: ' + error.message);
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
             }
         });
         
-        document.getElementById('phoneNumber').addEventListener('blur', function() {
-            const phoneRegex = /^[0-9]{10}$/;
-            if (!phoneRegex.test(this.value.replace(/\D/g, ''))) {
-                alert('Please enter a valid 10-digit phone number');
-                this.focus();
-            }
-        });
-        
-        document.getElementById('registrationNumber').addEventListener('blur', function() {
-            if (this.value.length < 5) {
-                alert('Please enter a valid registration number');
-                this.focus();
-            }
-        });
-        
-        document.addEventListener('DOMContentLoaded', async function() {
-            try {
-                const response = await fetch('/api/hospital/data');
-                const data = await response.json();
-                
-                if (data && data.specialities) {
-                    const select = document.getElementById('speciality');
-                    data.specialities.forEach(speciality => {
-                        const option = document.createElement('option');
-                        option.value = speciality;
-                        option.textContent = speciality;
-                        select.appendChild(option);
-                    });
-                }
-            } catch (error) {
-                console.error('Error loading specialities:', error);
-            }
-        });
         function generatePassword() {
             const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$!';
             let pwd = '';
             for (let i = 0; i < 12; i++) pwd += chars[Math.floor(Math.random() * chars.length)];
             document.getElementById('doctorPassword').value = pwd;
-            document.getElementById('doctorPassword').type = 'text';
         }
     </script>
 </body>

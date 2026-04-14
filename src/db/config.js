@@ -4,16 +4,19 @@ const { Pool } = require('pg');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes('localhost') ? false : { rejectUnauthorized: false },
+  ssl: {
+    rejectUnauthorized: false  // This bypasses SSL certificate validation
+  },
   max: 10,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
+  connectionTimeoutMillis: 10000,  // Increased from 5000
 });
 
 // Test connection on startup
 pool.connect((err, client, release) => {
   if (err) {
     console.error('❌ Database connection failed:', err.message);
+    console.error('Please check your DATABASE_URL in .env file');
   } else {
     console.log('✅ Database connected successfully');
     release();

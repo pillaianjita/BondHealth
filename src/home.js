@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 require('dotenv').config();
 const { query, getClient } = require('./db/config');
+const multer = require('multer');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
@@ -36,7 +37,49 @@ uploadDirs.forEach(dir => {
     }
 });
 
-// ============================================
+
+
+// Add doctor upload directories
+const doctorDirs = ['./uploads/doctors', './uploads/doctors/photos', './uploads/doctors/qualifications', './uploads/doctors/specializations', './uploads/doctors/idproofs', './uploads/doctors/appointments'];
+doctorDirs.forEach(dir => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        console.log(`Created directory: ${dir}`);
+    }
+});
+
+const doctorStorage = multer.diskStorage({
+    destination: function(req, file, cb) {
+        let folder = 'uploads/doctors';
+        if (file.fieldname === 'doctorImage') folder = 'uploads/doctors/photos';
+        else if (file.fieldname === 'qualificationCertificate') folder = 'uploads/doctors/qualifications';
+        else if (file.fieldname === 'specializationCertificate') folder = 'uploads/doctors/specializations';
+        else if (file.fieldname === 'govtIdDocument') folder = 'uploads/doctors/idproofs';
+        else if (file.fieldname === 'appointmentLetter') folder = 'uploads/doctors/appointments';
+        
+        if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
+        cb(null, folder);
+    },
+    filename: function(req, file, cb) {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+    }
+});
+
+const doctorUpload = multer({ 
+    storage: doctorStorage,
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: function(req, file, cb) {
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
+        if (allowedTypes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Invalid file type. Only JPEG, PNG, and PDF are allowed.'));
+        }
+    }
+});
+// =====
+// =======================================
 // JWT HELPERS
 // ============================================
 const generateToken = (user) => {
@@ -942,77 +985,140 @@ app.delete('/api/doctors/:doctorId', authenticate, authorize('admin'), async (re
 });
 
 // Add new doctor
-app.post('/api/hospital/add/doctor', authenticate, authorize('admin'), async (req, res) => {
-  const client = await getClient();
-  try {
-    await client.query('BEGIN');
+app.post('/api/test-doctor', (req, res) => {
+    console.log('TEST ROUTE HIT!');
+    console.log('Body:', req.body);
+    res.json({ success: true, message: 'Test route working' });
+});
+
+// Add new doctor with file upload - USING FORMDATA
+app.post('/api/hospital/add/doctor', authenticate, authorize('admin'), doctorUpload.fields([
+    { name: 'doctorImage', maxCount: 1 },
+    { name: 'qualificationCertificate', maxCount: 1 },
+    { name: 'specializationCertificate', maxCount: 1 },
+    { name: 'govtIdDocument', maxCount: 1 },
+    { name: 'appointmentLetter', maxCount: 1 }
+]), async (req, res) => {
+    console.log('=== DOCTOR REGISTRATION WITH FILES ===');
+    console.log('req.body:', req.body);
+    console.log('req.files:', req.files ? Object.keys(req.files) : 'No files');
+    console.log('req.user:', req.user);
     
-    const { name, speciality, phone, email, designation, dateOfBirth, education, 
-            medicalCouncil, registrationNumber, idType, idNumber, appointmentDate } = req.body;
-    
-    // Get hospital_id from the admin
-    const adminResult = await client.query(
-      'SELECT hospital_id FROM hospital_admins WHERE user_id = $1',
-      [req.user.id]
-    );
-    
-    const hospitalId = adminResult.rows[0]?.hospital_id;
-    
-    if (!hospitalId) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ success: false, error: 'Hospital not found' });
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
+        
+        const { name, speciality, phone, email, designation, dateOfBirth, education, 
+                medicalCouncil, registrationNumber, idType, idNumber, appointmentDate, password } = req.body;
+        
+        console.log('Parsed data:', { name, speciality, phone, email, designation, password });
+        
+        // Get hospital_id from the admin
+        const adminResult = await client.query(
+            'SELECT hospital_id FROM hospital_admins WHERE user_id = $1',
+            [req.user.id]
+        );
+        
+        const hospitalId = adminResult.rows[0]?.hospital_id;
+        
+        if (!hospitalId) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, error: 'Hospital not found' });
+        }
+        
+        // Create username from email
+        const username = email ? email.split('@')[0] : `doctor_${Date.now()}`;
+        
+        if (!password || password.trim().length < 6) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ success: false, error: 'Password is required and must be at least 6 characters' });
+        }
+        
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password.trim(), salt);
+        
+        // Create user account for doctor
+        const userResult = await client.query(
+            `INSERT INTO users (username, email, password_hash, role, hospital_id, must_change_password) 
+            VALUES ($1, $2, $3, $4, $5, true) RETURNING user_id`,
+            [username, email || `${username}@bondhealth.com`, hashedPassword, 'doctor', hospitalId]
+        );
+        
+        const userId = userResult.rows[0].user_id;
+        
+        // Generate doctor_uuid
+        const doctorUuid = `DR-${Date.now()}`;
+        
+        // Add doctor to doctors table
+        const doctorResult = await client.query(
+            `INSERT INTO doctors (
+                user_id, hospital_id, doctor_uuid, full_name, specialization, 
+                phone, email, designation, qualification, status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING *`,
+            [
+                userId, hospitalId, doctorUuid, name, speciality, 
+                phone, email, designation || 'Consultant', education || 'MBBS', 'Available'
+            ]
+        );
+        
+        const doctorId = doctorResult.rows[0].doctor_id;
+        
+        // Create doctor_documents table if it doesn't exist
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS doctor_documents (
+                doc_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                doctor_id UUID NOT NULL REFERENCES doctors(doctor_id) ON DELETE CASCADE,
+                document_type VARCHAR(50) NOT NULL,
+                file_url TEXT NOT NULL,
+                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Save uploaded files
+        const fileFields = {
+            doctorImage: 'profile_photo',
+            qualificationCertificate: 'qualification_certificate',
+            specializationCertificate: 'specialization_certificate',
+            govtIdDocument: 'id_proof',
+            appointmentLetter: 'appointment_letter'
+        };
+        
+        for (const [fieldName, docType] of Object.entries(fileFields)) {
+            if (req.files && req.files[fieldName] && req.files[fieldName][0]) {
+                const fileUrl = '/uploads/doctors/' + 
+                    (fieldName === 'doctorImage' ? 'photos/' : 
+                     fieldName === 'qualificationCertificate' ? 'qualifications/' :
+                     fieldName === 'specializationCertificate' ? 'specializations/' :
+                     fieldName === 'govtIdDocument' ? 'idproofs/' : 'appointments/') + 
+                    req.files[fieldName][0].filename;
+                
+                await client.query(
+                    `INSERT INTO doctor_documents (doctor_id, document_type, file_url) 
+                     VALUES ($1, $2, $3)`,
+                    [doctorId, docType, fileUrl]
+                );
+                console.log(`Saved ${fieldName} to: ${fileUrl}`);
+            }
+        }
+        
+        await client.query('COMMIT');
+        
+        console.log('Doctor registered successfully:', doctorId);
+        
+        res.json({ 
+            success: true, 
+            message: 'Doctor registered successfully',
+            initialPassword: password,
+            data: doctorResult.rows[0] 
+        });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error adding doctor:', error);
+        res.status(500).json({ success: false, error: error.message });
+    } finally {
+        client.release();
     }
-    
-    // Create username from email
-    const username = email ? email.split('@')[0] : `doctor_${Date.now()}`;
-    const rawPassword = req.body.password || req.body.doctorPassword;
-    if (!rawPassword || rawPassword.trim().length < 6) {
-    await client.query('ROLLBACK');
-    return res.status(400).json({ success: false, error: 'Password is required and must be at least 6 characters' });
-    }
-    // Create temporary password (you might want to generate a random one)
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(rawPassword.trim(), salt);
-    
-    // Create user account for doctor
-    const userResult = await client.query(
-        `INSERT INTO users (username, email, password_hash, role, hospital_id, must_change_password) 
-        VALUES ($1, $2, $3, $4, $5, true) RETURNING user_id`,
-        [username, email || `${username}@bondhealth.com`, hashedPassword, 'doctor', hospitalId]
-    );
-    
-    const userId = userResult.rows[0].user_id;
-    
-    // Generate doctor_uuid
-    const doctorUuid = `DR-${Date.now()}`;
-    
-    // Add doctor to doctors table
-    const doctorResult = await client.query(
-      `INSERT INTO doctors (
-        user_id, hospital_id, doctor_uuid, full_name, specialization, 
-        phone, email, designation, qualification, status
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [
-        userId, hospitalId, doctorUuid, name, speciality, 
-        phone, email, designation || 'Consultant', education || 'MBBS', 'Available'
-      ]
-    );
-    
-    await client.query('COMMIT');
-    
-    res.json({ 
-      success: true, 
-      message: 'Doctor registered successfully',
-      data: doctorResult.rows[0] 
-    });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error adding doctor:', error);
-    res.status(500).json({ success: false, error: error.message });
-  } finally {
-    client.release();
-  }
 });
 
 // Add new medicine
@@ -1044,6 +1150,7 @@ app.post('/api/hospital/add/medicine', authenticate, async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
 
 // Add new lab technician
 app.post('/api/hospital/add/lab', authenticate, async (req, res) => {
