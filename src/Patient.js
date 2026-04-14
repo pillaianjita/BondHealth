@@ -137,6 +137,14 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         return Number.isNaN(dateObj.getTime()) ? fallback : dateObj.toLocaleDateString();
     }
 
+    function formatShortDisplayDate(value, fallback = 'N/A') {
+        if (!value) return fallback;
+        const dateObj = new Date(value);
+        return Number.isNaN(dateObj.getTime())
+            ? fallback
+            : dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
     // Map appointments data
     const appointments = appointmentsData.map(apt => ({
         id: apt.appointment_uuid || apt.appointment_id,
@@ -190,6 +198,35 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
     function normalizeStatus(statusValue) {
         const normalized = String(statusValue || 'confirmed').trim().toLowerCase();
         return normalized === 'pending' ? 'confirmed' : normalized;
+    }
+
+    function deriveNextAppointmentFromList(appointmentList) {
+        const now = new Date();
+        const futureAppointments = appointmentList
+            .map(apt => ({
+                status: normalizeStatus(apt.status),
+                appointmentDateTime: parseAppointmentDateTime(apt.date, apt.time)
+            }))
+            .filter(apt =>
+                apt.appointmentDateTime instanceof Date &&
+                !Number.isNaN(apt.appointmentDateTime.getTime()) &&
+                apt.appointmentDateTime.getTime() >= now.getTime() &&
+                apt.status !== 'cancelled' &&
+                apt.status !== 'deleted' &&
+                apt.status !== 'completed'
+            )
+            .sort((a, b) => a.appointmentDateTime - b.appointmentDateTime);
+
+        return futureAppointments.length > 0 ? futureAppointments[0].appointmentDateTime : null;
+    }
+
+    if (patient) {
+        const derivedNextAppointment = deriveNextAppointmentFromList(appointments);
+        if (derivedNextAppointment) {
+            patient.nextAppointment = derivedNextAppointment;
+        } else if (Number.isNaN(new Date(patient.nextAppointment).getTime())) {
+            patient.nextAppointment = null;
+        }
     }
 
     function getStatusPillClass(statusValue) {
@@ -821,7 +858,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
               <div class="cyan-light rounded-xl p-4 min-w-[120px] text-center relative">
                 <p class="text-sm cyan-text font-medium">Next Visit</p>
                 <p class="text-xl font-bold cyan-text">
-                  ${patient.nextAppointment ? new Date(patient.nextAppointment).toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) : 'N/A'}
+                  ${formatShortDisplayDate(patient.nextAppointment, 'N/A')}
                 </p>
                 <div class="absolute -top-2 -right-2 w-4 h-4 cyan-bg rounded-full pulse-dot"></div>
               </div>
