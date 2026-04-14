@@ -49,7 +49,7 @@ function getAllAppointments(todaysAppointments) {
 }
 
 // ── Main HTML generator ───────────────────────────────────────
-function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}) {
+function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}, pendingLeaveRequests = []) {
   const allAppointments = getAllAppointments(appointmentsData);
   const hospitalName = hospitalData.name || 'Hospital Dashboard';
   const hospitalType = hospitalData.type || 'Admin Dashboard';
@@ -122,7 +122,12 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
             <div class="nav-item active" onclick="showSection('dashboard')"><i class="fas fa-tachometer-alt mr-3"></i>Dashboard</div>
             <div class="nav-item" onclick="showSection('doctors')"><i class="fas fa-user-md mr-3"></i>All Doctors</div>
             <div class="nav-item" onclick="showSection('schedule')"><i class="fas fa-calendar-alt mr-3"></i>Today's Schedule</div>
-            <div class="nav-item" onclick="showLeaveModal()"><i class="fas fa-calendar-times mr-3"></i>Update Leave</div>
+            <div class="nav-item flex items-center justify-between" onclick="showLeaveModal()">
+                <span><i class="fas fa-calendar-times mr-3"></i>Update Leave</span>
+                ${pendingLeaveRequests.length > 0
+                  ? `<span class="ml-2 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-xs font-bold rounded-full">${pendingLeaveRequests.length}</span>`
+                  : ''}
+            </div>
             <div class="nav-item" onclick="openDoctorRegistration()"><i class="fas fa-user-plus mr-3"></i>Add Details</div>
         </div>
         <div class="pt-6 border-t border-gray-200">
@@ -156,8 +161,11 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
                 <button class="bg-cyan-600 text-white px-6 py-2 rounded-lg hover:bg-cyan-700 transition-colors flex items-center gap-2" onclick="openAddDoctorForm()">
                     <i class="fas fa-user-plus"></i> Register Doctor
                 </button>
-                <div class="relative">
+                <div class="relative" title="${pendingLeaveRequests.length} pending leave request(s)">
                     <i class="fas fa-bell text-gray-500 text-xl cursor-pointer"></i>
+                    ${pendingLeaveRequests.length > 0
+                      ? `<span class="absolute -top-2 -right-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full">${pendingLeaveRequests.length}</span>`
+                      : ''}
                 </div>
                 <button onclick="logout()" class="md:hidden bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors flex items-center gap-2">
                     <i class="fas fa-sign-out-alt"></i> Sign Out
@@ -242,6 +250,42 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
                                 <div class="text-center py-8 text-gray-500"><i class="fas fa-check-circle text-3xl mb-3 text-gray-300"></i><p>No doctors on leave today</p></div>` : ''}
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 bg-white rounded-lg border border-gray-200 p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h4 class="font-bold text-gray-800">Pending Leave Requests</h4>
+                        <span class="status-badge ${pendingLeaveRequests.length ? 'status-leave' : 'status-available'}">${pendingLeaveRequests.length}</span>
+                    </div>
+                    <div class="space-y-3">
+                        ${pendingLeaveRequests.map(req => `
+                        <div class="p-4 border border-amber-200 bg-amber-50 rounded-lg">
+                            <div class="flex items-start justify-between gap-4">
+                                <div>
+                                    <p class="font-semibold text-gray-800">${req.doctor_name}</p>
+                                    <p class="text-sm text-gray-600">${req.specialization || ''}</p>
+                                    <p class="text-sm text-amber-700 mt-1">${new Date(req.from_date).toLocaleDateString()} → ${new Date(req.to_date).toLocaleDateString()}</p>
+                                    <p class="text-sm text-gray-700 mt-1">${req.reason || 'No reason provided'}</p>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button class="px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700"
+                                            onclick="decideLeaveRequest('${req.leave_id}', 'Approved', '${req.doctor_name.replace(/'/g, "\\'")}')">
+                                        <i class="fas fa-check mr-1"></i>Approve
+                                    </button>
+                                    <button class="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700"
+                                            onclick="decideLeaveRequest('${req.leave_id}', 'Rejected', '${req.doctor_name.replace(/'/g, "\\'")}')">
+                                        <i class="fas fa-times mr-1"></i>Reject
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        `).join('')}
+                        ${pendingLeaveRequests.length === 0 ? `
+                        <div class="text-center py-8 text-gray-500">
+                            <i class="fas fa-inbox text-3xl mb-3 text-gray-300"></i>
+                            <p>No pending leave requests</p>
+                        </div>` : ''}
                     </div>
                 </div>
             </div>
@@ -626,6 +670,30 @@ function generateHTML(doctorsData = [], appointmentsData = [], hospitalData = {}
             .catch(() => alert('Failed to update leave. Please try again.'));
         }
 
+        function decideLeaveRequest(leaveId, decision, doctorName) {
+            if (!leaveId) return;
+            const confirmText = decision === 'Approved'
+                ? 'Approve leave for ' + doctorName + '?'
+                : 'Reject leave for ' + doctorName + '?';
+            if (!confirm(confirmText)) return;
+
+            fetch('/api/admin/leave/' + leaveId + '/decision', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ decision })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('Leave request ' + decision.toLowerCase() + ' for ' + doctorName);
+                    setTimeout(() => window.location.reload(), 1200);
+                } else {
+                    showToast(data.message || ('Failed to ' + decision.toLowerCase() + ' request'), 'error');
+                }
+            })
+            .catch(() => showToast('Failed to process leave request', 'error'));
+        }
+
         // ── Toast ──────────────────────────────────────────────────────
         function showToast(message, type = 'success') {
             const colors = { success: 'bg-cyan-600', error: 'bg-red-600' };
@@ -722,7 +790,22 @@ module.exports = async function renderAdminDashboard(userId) {
       [hospitalId]
     );
 
-    return generateHTML(doctorsResult.rows, appointmentsResult.rows, hospitalResult.rows[0] || {});
+    const pendingLeavesResult = await query(
+      `SELECT dl.leave_id, dl.doctor_id, dl.from_date, dl.to_date, dl.reason, dl.created_at,
+              d.full_name as doctor_name, d.specialization
+       FROM doctor_leave dl
+       JOIN doctors d ON d.doctor_id = dl.doctor_id
+       WHERE d.hospital_id = $1 AND dl.status = 'Pending'
+       ORDER BY dl.created_at DESC`,
+      [hospitalId]
+    );
+
+    return generateHTML(
+      doctorsResult.rows,
+      appointmentsResult.rows,
+      hospitalResult.rows[0] || {},
+      pendingLeavesResult.rows
+    );
   } catch (error) {
     console.error('Error loading admin dashboard data:', error);
     return `<h1>Error loading dashboard</h1><p>${error.message}</p>`;

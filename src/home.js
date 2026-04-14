@@ -942,6 +942,92 @@ app.delete('/api/doctors/:doctorId/leave', authenticate, authorize('admin'), asy
   }
 });
 
+// Admin: view pending doctor leave requests for their hospital
+app.get('/api/admin/leave/pending', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const adminResult = await query(
+      'SELECT hospital_id FROM hospital_admins WHERE user_id = $1',
+      [req.user.id]
+    );
+    const hospitalId = adminResult.rows[0]?.hospital_id;
+    if (!hospitalId) return res.status(404).json({ success: false, message: 'Hospital not found' });
+
+    const result = await query(
+      `SELECT dl.leave_id, dl.doctor_id, dl.from_date, dl.to_date, dl.reason, dl.status, dl.created_at,
+              d.full_name as doctor_name, d.specialization, d.hospital_id
+       FROM doctor_leave dl
+       JOIN doctors d ON d.doctor_id = dl.doctor_id
+       WHERE d.hospital_id = $1 AND dl.status = 'Pending'
+       ORDER BY dl.created_at DESC`,
+      [hospitalId]
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Admin: approve/reject a leave request
+app.post('/api/admin/leave/:leaveId/decision', authenticate, authorize('admin'), async (req, res) => {
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    const { leaveId } = req.params;
+    const { decision } = req.body;
+    if (!['Approved', 'Rejected'].includes(decision)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'Decision must be Approved or Rejected' });
+    }
+
+    const adminResult = await client.query(
+      'SELECT hospital_id FROM hospital_admins WHERE user_id = $1',
+      [req.user.id]
+    );
+    const hospitalId = adminResult.rows[0]?.hospital_id;
+    if (!hospitalId) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Hospital not found' });
+    }
+
+    const leaveResult = await client.query(
+      `SELECT dl.leave_id, dl.doctor_id, d.hospital_id
+       FROM doctor_leave dl
+       JOIN doctors d ON d.doctor_id = dl.doctor_id
+       WHERE dl.leave_id = $1 AND dl.status = 'Pending'`,
+      [leaveId]
+    );
+    if (leaveResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Pending leave request not found' });
+    }
+    if (String(leaveResult.rows[0].hospital_id) !== String(hospitalId)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ success: false, message: 'Not authorized for this leave request' });
+    }
+
+    await client.query(
+      'UPDATE doctor_leave SET status = $1 WHERE leave_id = $2',
+      [decision, leaveId]
+    );
+
+    if (decision === 'Approved') {
+      await client.query(
+        "UPDATE doctors SET status = 'On Leave' WHERE doctor_id = $1",
+        [leaveResult.rows[0].doctor_id]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: `Leave request ${decision.toLowerCase()}` });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ success: false, message: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 // ... existing leave delete route above ...
 
 app.delete('/api/doctors/:doctorId', authenticate, authorize('admin'), async (req, res) => {
