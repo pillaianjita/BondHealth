@@ -106,7 +106,7 @@ function buildReportCardHTML(r) {
     <div class="cyan-light rounded-xl p-5 hover-lift report-card" data-id="${esc(r.report_id)}">
       <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div class="flex items-center space-x-4">
-          <div class="w-14 h-14 ${r.status === 'reviewed' ? 'cyan-bg' : 'cyan-dark'} rounded-full flex items-center justify-center flex-shrink-0">
+          <div class="w-14 h-14 ${((r.status || '').toLowerCase() === 'verified' || (r.status || '').toLowerCase() === 'reviewed') ? 'cyan-bg' : 'cyan-dark'} rounded-full flex items-center justify-center flex-shrink-0">
             <i class="fas ${isECG ? 'fa-heartbeat' : 'fa-vial'} text-xl text-white"></i>
           </div>
           <div>
@@ -127,7 +127,7 @@ function buildReportCardHTML(r) {
             <button class="px-3 py-1.5 btn-white rounded-lg text-sm write-findings-btn"
               data-id="${esc(r.report_id)}"
               data-findings="${esc(r.findings || '')}">
-              ${r.status === 'reviewed' ? 'Update' : 'Add Findings'}
+              ${((r.status || '').toLowerCase() === 'verified' || (r.status || '').toLowerCase() === 'reviewed') ? 'Update' : 'Add Findings'}
             </button>
             <button class="px-3 py-1.5 btn-white rounded-lg text-sm download-report-btn"
               data-id="${esc(r.report_id)}"
@@ -303,6 +303,7 @@ function generateDoctorHTML(doctor = null, appointments = [], reports = [], pati
     .status-confirmed{background:#d1fae5;color:#065f46}
     .status-pending{background:#fef3c7;color:#92400e}
     .status-reviewed{background:#dbeafe;color:#1e40af}
+    .status-verified{background:#dbeafe;color:#1e40af}
     .status-active{background:#dcfce7;color:#166534}
     .status-cancelled{background:#fee2e2;color:#991b1b}
     .form-input{width:100%;padding:0.75rem;border:2px solid #e0f2fe;border-radius:0.5rem;transition:all 0.3s ease}
@@ -985,7 +986,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="cyan-light rounded-xl p-5 hover-lift report-card" data-id="\${id}">
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div class="flex items-center space-x-4">
-            <div class="w-14 h-14 \${r.status==='reviewed'?'cyan-bg':'cyan-dark'} rounded-full flex items-center justify-center flex-shrink-0">
+            <div class="w-14 h-14 \${((r.status||'').toLowerCase()==='verified'||(r.status||'').toLowerCase()==='reviewed')?'cyan-bg':'cyan-dark'} rounded-full flex items-center justify-center flex-shrink-0">
               <i class="fas \${isECG?'fa-heartbeat':'fa-vial'} text-xl text-white"></i>
             </div>
             <div>
@@ -1001,7 +1002,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <div class="flex flex-wrap gap-2">
               <button class="px-3 py-1.5 btn-cyan rounded-lg text-sm view-report-btn" data-id="\${id}"><i class="fas fa-eye mr-1"></i>View</button>
-              <button class="px-3 py-1.5 btn-white rounded-lg text-sm write-findings-btn" data-id="\${id}" data-findings="\${findings}">\${r.status==='reviewed'?'Update':'Add Findings'}</button>
+              <button class="px-3 py-1.5 btn-white rounded-lg text-sm write-findings-btn" data-id="\${id}" data-findings="\${findings}">\${((r.status||'').toLowerCase()==='verified'||(r.status||'').toLowerCase()==='reviewed')?'Update':'Add Findings'}</button>
               <button class="px-3 py-1.5 btn-white rounded-lg text-sm download-report-btn" data-id="\${id}" data-patient="\${pn}" data-type="\${testType}" data-date="\${escHTML(r.test_date)}" data-findings="\${findings}"><i class="fas fa-download mr-1"></i>PDF</button>
               <button class="px-3 py-1.5 btn-white rounded-lg text-sm share-report-btn" data-id="\${id}"><i class="fas fa-share-alt mr-1"></i>Share</button>
               <button class="px-3 py-1.5 btn-red rounded-lg text-sm delete-report-btn" data-id="\${id}" data-patient="\${pn}" data-type="\${testType}"><i class="fas fa-trash mr-1"></i>Delete</button>
@@ -1110,10 +1111,11 @@ document.addEventListener('DOMContentLoaded', () => {
           const rFind = escHTML(r.findings || '');
           const rDate = escHTML(r.test_date);
           const rCreated = r.created_at ? new Date(r.created_at).toLocaleDateString() : 'N/A';
+          const rFileUrl = r.file_view_url ? escHTML(r.file_view_url) : '';
           document.getElementById('reportViewContent').innerHTML = \`
             <div class="space-y-4">
               <div class="flex items-center gap-4 p-4 cyan-light rounded-xl">
-                <div class="w-16 h-16 \${r.status==='reviewed'?'cyan-bg':'cyan-dark'} rounded-full flex items-center justify-center flex-shrink-0"><i class="fas fa-vial text-2xl text-white"></i></div>
+                <div class="w-16 h-16 \${((r.status||'').toLowerCase()==='verified'||(r.status||'').toLowerCase()==='reviewed')?'cyan-bg':'cyan-dark'} rounded-full flex items-center justify-center flex-shrink-0"><i class="fas fa-vial text-2xl text-white"></i></div>
                 <div><h3 class="text-xl font-bold cyan-text">\${rPn}</h3><p class="text-gray-500 text-sm">ID: \${rUuid}</p></div>
               </div>
               <div class="grid grid-cols-2 gap-3">
@@ -1123,9 +1125,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="cyan-light p-3 rounded-xl"><p class="text-xs cyan-text opacity-70">Uploaded</p><p class="font-semibold cyan-text mt-1">\${rCreated}</p></div>
               </div>
               \${r.findings ? '<div class="p-4 bg-blue-50 rounded-xl border-l-4 border-blue-400"><p class="text-sm font-semibold text-blue-700 mb-1">Clinical Findings</p><p class="text-gray-700">'+rFind+'</p></div>' : '<p class="text-gray-400 italic text-sm">No findings added yet.</p>'}
-              \${r.file_url ? '<a href="'+escHTML(r.file_url)+'" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 p-3 cyan-light rounded-xl cyan-text hover:opacity-80"><i class="fas fa-file-download"></i><span>View Attached File</span></a>' : ''}
+              \${rFileUrl ? '<a href="'+rFileUrl+'" target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 p-3 cyan-light rounded-xl cyan-text hover:opacity-80"><i class="fas fa-file-download"></i><span>View Attached File</span></a>' : ''}
               <div class="flex gap-3 pt-2 flex-wrap">
-                <button class="px-4 py-2 btn-white rounded-lg text-sm" id="viewFindingsBtn"><i class="fas fa-edit mr-1"></i>\${r.status==='reviewed'?'Update Findings':'Add Findings'}</button>
+                <button class="px-4 py-2 btn-white rounded-lg text-sm" id="viewFindingsBtn"><i class="fas fa-edit mr-1"></i>\${((r.status||'').toLowerCase()==='verified'||(r.status||'').toLowerCase()==='reviewed')?'Update Findings':'Add Findings'}</button>
                 <button class="px-4 py-2 btn-white rounded-lg text-sm" id="viewDownloadBtn"><i class="fas fa-download mr-1"></i>Download PDF</button>
                 <button class="px-4 py-2 btn-cyan rounded-lg text-sm" id="viewShareBtn"><i class="fas fa-share-alt mr-1"></i>Share</button>
               </div>
@@ -1180,10 +1182,17 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const res = await fetch(\`/api/doctor/report/\${id}/download\`);
       if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('text/html')) {
+          printFallback(id, patient, type, date, findings);
+          return;
+        }
         const blob = await res.blob();
         const url  = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = 'report_' + id + '.pdf';
+        const cd = res.headers.get('content-disposition') || '';
+        const m = cd.match(/filename="?([^"]+)"?/i);
+        a.href = url; a.download = (m && m[1]) ? m[1] : ('report_' + id + '.pdf');
         document.body.appendChild(a); a.click();
         URL.revokeObjectURL(url); a.remove();
         showToast('Downloaded', 'PDF saved', 'success');

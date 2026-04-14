@@ -1806,6 +1806,14 @@ app.post('/api/lab/upload-report', authenticate, authorize('lab'), upload.single
             }
         }
         const fileData = await storageService.uploadFile(req.file, 'reports');
+        // Ensure report is physically present in canonical reports folder
+        const canonicalReportsDir = path.join(UPLOADS_ROOT, 'reports');
+        if (!fs.existsSync(canonicalReportsDir)) fs.mkdirSync(canonicalReportsDir, { recursive: true });
+        const canonicalReportPath = path.join(canonicalReportsDir, fileData.filename);
+        const uploadedPath = req.file.path;
+        if (uploadedPath && uploadedPath !== canonicalReportPath && fs.existsSync(uploadedPath) && !fs.existsSync(canonicalReportPath)) {
+            fs.copyFileSync(uploadedPath, canonicalReportPath);
+        }
         const reportUUID = 'REP-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
         const today = new Date().toISOString().split('T')[0];
 
@@ -1825,8 +1833,8 @@ app.post('/api/lab/upload-report', authenticate, authorize('lab'), upload.single
                 testType, 
                 today, 
                 findings || 'No findings', 
-                fileData.url, 
-                'completed', 
+                `/uploads/reports/${fileData.filename}`, 
+                'pending', 
                 priority || 'normal', 
                 sendTo || 'doctor'  // Use the value from the form, default to 'doctor'
             ]
@@ -2609,7 +2617,7 @@ app.get('/api/doctor/reports', authenticate, authorize('doctor'), async (req, re
              JOIN patients p ON r.patient_id = p.patient_id
              JOIN doctors d ON r.doctor_id = d.doctor_id
              WHERE d.user_id = $1
-             AND r.shared_with IN ('doctor', 'both')
+             AND (r.shared_with IS NULL OR r.shared_with IN ('doctor', 'both', 'hospital', 'all', 'outside'))
              ORDER BY r.created_at DESC LIMIT 50`,
             [req.user.id]
         );
@@ -2626,8 +2634,8 @@ app.get('/api/lab-reports', authenticate, authorize('doctor'), async (req, res) 
             `SELECT r.*, p.full_name as patient_name FROM lab_reports r
              JOIN patients p ON r.patient_id = p.patient_id
              JOIN doctors d ON r.doctor_id = d.doctor_id
-             WHERE d.user_id = $1 AND r.status = 'pending'
-             AND r.shared_with IN ('doctor', 'both')
+             WHERE d.user_id = $1 AND r.status IN ('pending', 'Pending')
+             AND (r.shared_with IS NULL OR r.shared_with IN ('doctor', 'both', 'hospital', 'all', 'outside'))
              ORDER BY r.created_at DESC`,
             [req.user.id]
         );
@@ -2737,7 +2745,7 @@ app.get('/api/doctor/patient/:patientId', authenticate, async (req, res) => {
 });
 
 // Get single report details
-app.get('/api/doctor/report/:reportId', authenticate, async (req, res) => {
+app.get('/api/doctor/report/:reportId', authenticate, authorize('doctor'), async (req, res) => {
     try {
         const result = await query(
             `SELECT r.*, p.full_name as patient_name
@@ -2746,7 +2754,28 @@ app.get('/api/doctor/report/:reportId', authenticate, async (req, res) => {
             [req.params.reportId]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Report not found' });
-        res.json(result.rows[0]);
+        const report = result.rows[0];
+        let file_view_url = null;
+        if (report.file_url) {
+            const normalizedUrl = String(report.file_url).replace(/\\/g, '/');
+            const fileName = normalizedUrl.split('/').pop();
+            const candidates = [
+                fileName ? path.join(UPLOADS_ROOT, 'reports', fileName) : null,
+                fileName ? path.join(__dirname, 'uploads', 'reports', fileName) : null,
+                fileName ? path.join(UPLOADS_ROOT, fileName) : null,
+                fileName ? path.join(__dirname, 'uploads', fileName) : null,
+                path.join(process.cwd(), normalizedUrl.replace(/^\//, '')),
+                path.join(__dirname, normalizedUrl.replace(/^\//, '')),
+                path.join(UPLOADS_ROOT, normalizedUrl.replace(/^\/?uploads\//, ''))
+            ].filter(Boolean);
+            const existing = candidates.find(p => fs.existsSync(p));
+            if (existing) {
+                const parent = path.basename(path.dirname(existing)).toLowerCase();
+                if (parent === 'reports') file_view_url = '/uploads/reports/' + path.basename(existing);
+                else file_view_url = '/uploads/' + path.basename(existing);
+            }
+        }
+        res.json({ ...report, file_view_url });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -2754,7 +2783,7 @@ app.get('/api/doctor/report/:reportId', authenticate, async (req, res) => {
 
 // Download report PDF (by report_id UUID — used by doctor dashboard)
 // FIX: doctor-apis.js had wrong path construction; corrected here
-app.get('/api/doctor/report/:reportId/download', authenticate, async (req, res) => {
+app.get('/api/doctor/report/:reportId/download', authenticate, authorize('doctor'), async (req, res) => {
     try {
         const result = await query(
             'SELECT file_url, test_type, report_uuid, findings, patient_id FROM lab_reports WHERE report_id = $1',
@@ -2765,16 +2794,22 @@ app.get('/api/doctor/report/:reportId/download', authenticate, async (req, res) 
 
         // If a file was uploaded, serve it directly
         if (report.file_url) {
-            const fileName = report.file_url.split('/').pop();
-            // Try reports folder first, then any uploads subfolder
+            const normalizedUrl = String(report.file_url).replace(/\\/g, '/');
+            const fileName = normalizedUrl.split('/').pop();
             const tryPaths = [
-                path.join(__dirname, 'uploads', 'reports', fileName),
-                path.join(__dirname, report.file_url.replace(/^\//, ''))
-            ];
+                fileName ? path.join(UPLOADS_ROOT, 'reports', fileName) : null,
+                fileName ? path.join(__dirname, 'uploads', 'reports', fileName) : null,
+                path.join(process.cwd(), normalizedUrl.replace(/^\//, '')),
+                path.join(__dirname, normalizedUrl.replace(/^\//, '')),
+                path.join(UPLOADS_ROOT, normalizedUrl.replace(/^\/?uploads\//, ''))
+            ].filter(Boolean);
             const filePath = tryPaths.find(p => fs.existsSync(p));
             if (filePath) {
-                return res.download(filePath, `${report.test_type || 'report'}_${report.report_uuid || req.params.reportId}.pdf`);
+                const ext = path.extname(filePath) || '.pdf';
+                const safeName = `${(report.test_type || 'report').replace(/[^a-zA-Z0-9_-]/g, '_')}_${report.report_uuid || req.params.reportId}${ext}`;
+                return res.download(filePath, safeName);
             }
+            return res.status(404).json({ error: 'Report file not found on server' });
         }
 
         // No file — generate a simple PDF-like HTML response the browser can print/save
@@ -2803,13 +2838,13 @@ app.get('/api/doctor/report/:reportId/download', authenticate, async (req, res) 
 });
 
 // Add/update findings on a report
-app.post('/api/doctor/report/:reportId/findings', authenticate, async (req, res) => {
+app.post('/api/doctor/report/:reportId/findings', authenticate, authorize('doctor'), async (req, res) => {
     const client = await getClient();
     try {
         await client.query('BEGIN');
         const result = await client.query(
             'UPDATE lab_reports SET findings = $1, status = $2 WHERE report_id = $3 RETURNING *',
-            [req.body.findings, 'reviewed', req.params.reportId]
+            [req.body.findings, 'verified', req.params.reportId]
         );
         await client.query('COMMIT');
         res.json({ success: true, data: result.rows[0] });
@@ -2822,10 +2857,12 @@ app.post('/api/doctor/report/:reportId/findings', authenticate, async (req, res)
 });
 
 // Share report
-app.post('/api/doctor/report/:reportId/share', authenticate, async (req, res) => {
+app.post('/api/doctor/report/:reportId/share', authenticate, authorize('doctor'), async (req, res) => {
     try {
         const { scope } = req.body;
-        const sharedWith = scope === 'hospital' ? 'hospital' : 'outside';
+        // Keep storage values compatible with existing queries and visibility logic.
+        // hospital/outside => doctors; all => both doctors and patients.
+        const sharedWith = scope === 'all' ? 'both' : 'doctor';
         const result = await query(
             'UPDATE lab_reports SET shared_with = $1 WHERE report_id = $2 RETURNING *',
             [sharedWith, req.params.reportId]
@@ -2874,8 +2911,8 @@ app.post('/api/doctor/report/upload', authenticate, authorize('doctor'), upload.
         }
 
         const inserted = await client.query(
-            `INSERT INTO lab_reports (patient_id, doctor_id, test_type, test_date, findings, file_url, status)
-             VALUES ($1, $2, $3, $4::date, $5, $6, 'pending') RETURNING *`,
+            `INSERT INTO lab_reports (patient_id, doctor_id, test_type, test_date, findings, file_url, status, shared_with)
+             VALUES ($1, $2, $3, $4::date, $5, $6, 'pending', 'doctor') RETURNING *`,
             [patient_id, doctorRes.rows[0].doctor_id, test_type, test_date, findings, file_url]
         );
         await client.query('COMMIT');
@@ -3312,6 +3349,21 @@ app.get('/api/hospital/data', authenticate, async (req, res) => {
 // Serve uploaded reports
 app.get('/uploads/reports/:file', (req, res) => {
     const candidates = [
+      path.join(UPLOADS_ROOT, 'reports', req.params.file),
+      path.join(__dirname, 'uploads', 'reports', req.params.file),
+      path.join(UPLOADS_ROOT, 'temp', req.params.file),
+      path.join(__dirname, 'uploads', 'temp', req.params.file)
+    ];
+    const filePath = candidates.find(p => fs.existsSync(p));
+    if (filePath) res.sendFile(filePath);
+    else res.status(404).json({ error: 'File not found' });
+});
+
+// Legacy direct file URLs like /uploads/placeholder.pdf
+app.get('/uploads/:file', (req, res) => {
+    const candidates = [
+      path.join(UPLOADS_ROOT, req.params.file),
+      path.join(__dirname, 'uploads', req.params.file),
       path.join(UPLOADS_ROOT, 'reports', req.params.file),
       path.join(__dirname, 'uploads', 'reports', req.params.file)
     ];
