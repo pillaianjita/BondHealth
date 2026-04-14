@@ -2162,9 +2162,12 @@ app.put('/api/patient', authenticate, authorize('patient'), upload.single('profi
 
         const { 
             full_name, phone, address,
-            emergency_contact_name, emergency_contact_phone,
+            emergency_contact_name, emergency_contact_phone, emergency_relation,
             medical_conditions, allergies, blood_type, gender, remove_profile_photo
         } = req.body;
+
+        // Keep schema compatible across environments.
+        await query('ALTER TABLE patients ADD COLUMN IF NOT EXISTS emergency_relation VARCHAR(100)');
 
         let profilePhotoUrl = null;
         const shouldRemoveProfilePhoto = String(remove_profile_photo || '').toLowerCase() === 'true';
@@ -2187,19 +2190,20 @@ app.put('/api/patient', authenticate, authorize('patient'), upload.single('profi
                      address                  = COALESCE($3, address),
                      emergency_contact_name   = COALESCE($4, emergency_contact_name),
                      emergency_contact_phone  = COALESCE($5, emergency_contact_phone),
-                     medical_conditions       = COALESCE($6, medical_conditions),
-                     allergies                = COALESCE($7, allergies),
-                     blood_type               = COALESCE($8, blood_type),
-                     gender                   = COALESCE($9, gender),
+                     emergency_relation       = COALESCE($6, emergency_relation),
+                     medical_conditions       = COALESCE($7, medical_conditions),
+                     allergies                = COALESCE($8, allergies),
+                     blood_type               = COALESCE($9, blood_type),
+                     gender                   = COALESCE($10, gender),
                      profile_photo_url        = CASE 
-                           WHEN $10 = '' THEN NULL
-                           ELSE COALESCE($10, profile_photo_url)
+                           WHEN $11 = '' THEN NULL
+                           ELSE COALESCE($11, profile_photo_url)
                      END
-                 WHERE user_id = $11
+                 WHERE user_id = $12
                  RETURNING *`,
                 [
                     full_name, phone, address,
-                    emergency_contact_name, emergency_contact_phone,
+                    emergency_contact_name, emergency_contact_phone, emergency_relation,
                     parseMaybeJsonArray(medical_conditions), parseMaybeJsonArray(allergies), blood_type, gender,
                     profilePhotoUrl, req.user.id
                 ]
@@ -2220,8 +2224,7 @@ app.put('/api/patient', authenticate, authorize('patient'), upload.single('profi
                      WHERE user_id = $10
                      RETURNING *`,
                     [
-                        full_name, phone, address,
-                        emergency_contact_name, emergency_contact_phone,
+                        full_name, phone, address, emergency_contact_name, emergency_contact_phone,
                         parseMaybeJsonArray(medical_conditions), parseMaybeJsonArray(allergies), blood_type, gender,
                         req.user.id
                     ]

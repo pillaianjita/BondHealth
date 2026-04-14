@@ -83,11 +83,15 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
         photoUrl: patientData.profile_photo_url || patientData.photo_url || null,
         contact: patientData.phone || 'Phone not provided',
         address: patientData.address || 'Address not provided',
+        emergencyContactName: patientData.emergency_contact_name || '',
+        emergencyContactPhone: patientData.emergency_contact_phone || '',
+        emergencyRelation: patientData.emergency_relation || '',
         emergencyContact: (() => {
         const name = patientData.emergency_contact_name;
         const phone = patientData.emergency_contact_phone;
+        const relation = patientData.emergency_relation;
         
-        if (name && phone) return `${name} - ${phone}`;
+        if (name && phone) return `${name}${relation ? ` (${relation})` : ''} - ${phone}`;
         if (name) return `${name} (no phone provided)`;
         if (phone) return `Emergency contact phone: ${phone} (name not provided)`;
         return 'Emergency contact not provided';
@@ -125,6 +129,12 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
             age--;
         }
         return age;
+    }
+
+    function formatDisplayDate(value, fallback = 'N/A') {
+        if (!value) return fallback;
+        const dateObj = new Date(value);
+        return Number.isNaN(dateObj.getTime()) ? fallback : dateObj.toLocaleDateString();
     }
 
     // Map appointments data
@@ -796,7 +806,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
               'Blood Type': patient.bloodType,
               'Contact': patient.contact,
               'Email': patient.email,
-              'Last Visit': patient.lastVisit ? new Date(patient.lastVisit).toLocaleDateString() : 'N/A'
+              'Last Visit': formatDisplayDate(patient.lastVisit, 'N/A')
             }).map(([key, value]) => `
               <div class="cyan-light p-4 rounded-xl">
                 <p class="text-sm cyan-text">${key}</p>
@@ -848,7 +858,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
       
       <!-- Edit Profile Modal -->
       <div id="editProfileModal" class="fixed inset-0 modal-overlay z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto animate-slide-up scrollbar-thin">
+        <div id="editProfileDialog" class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto animate-slide-up scrollbar-thin">
           <div class="p-6">
             <div class="flex justify-between items-center mb-6">
               <h3 class="text-2xl font-bold cyan-text">Edit Profile</h3>
@@ -926,15 +936,15 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                 <div>
                   <label class="block text-sm font-medium cyan-text mb-2">Contact Name</label>
-                  <input type="text" id="editEmergencyName" value="${patient.emergencyContact.split(' ')[0]} ${patient.emergencyContact.split(' ')[1] || ''}" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                  <input type="text" id="editEmergencyName" value="${patient.emergencyContactName}" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500">
                 </div>
                 <div>
                   <label class="block text-sm font-medium cyan-text mb-2">Relationship</label>
-                  <input type="text" id="editEmergencyRelation" value="Wife" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                  <input type="text" id="editEmergencyRelation" value="${patient.emergencyRelation}" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500">
                 </div>
                 <div class="md:col-span-2">
                   <label class="block text-sm font-medium cyan-text mb-2">Emergency Phone</label>
-                  <input type="tel" id="editEmergencyPhone" value="+1 (555) 987-6543" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                  <input type="tel" id="editEmergencyPhone" value="${patient.emergencyContactPhone}" placeholder="+91 98765 43210 (or any international number)" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500">
                 </div>
               </div>
               
@@ -1376,26 +1386,44 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
           
           const editProfileBtn = document.getElementById('editProfileBtn');
           const editProfileModal = document.getElementById('editProfileModal');
+          const editProfileDialog = document.getElementById('editProfileDialog');
           const closeEditProfileModal = document.getElementById('closeEditProfileModal');
           const cancelEditProfile = document.getElementById('cancelEditProfile');
+          let editProfileBackdropMouseDown = false;
           
-          editProfileBtn.addEventListener('click', () => {
+          const openEditProfileModal = () => {
             profileModal.classList.add('hidden');
             editProfileModal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+          };
+          const closeEditProfile = () => {
+            editProfileModal.classList.add('hidden');
+            document.body.style.overflow = '';
+          };
+
+          editProfileBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openEditProfileModal();
           });
           
-          closeEditProfileModal.addEventListener('click', () => {
-            editProfileModal.classList.add('hidden');
-          });
+          closeEditProfileModal.addEventListener('click', closeEditProfile);
           
-          cancelEditProfile.addEventListener('click', () => {
-            editProfileModal.classList.add('hidden');
+          cancelEditProfile.addEventListener('click', closeEditProfile);
+
+          // Prevent accidental backdrop close while selecting text/dragging inside dialog.
+          editProfileDialog?.addEventListener('mousedown', (e) => e.stopPropagation());
+          editProfileDialog?.addEventListener('click', (e) => e.stopPropagation());
+
+          editProfileModal.addEventListener('mousedown', (e) => {
+            editProfileBackdropMouseDown = e.target === editProfileModal;
           });
           
           editProfileModal.addEventListener('click', (e) => {
-            if (e.target === editProfileModal) {
-              editProfileModal.classList.add('hidden');
+            if (e.target === editProfileModal && editProfileBackdropMouseDown) {
+              closeEditProfile();
             }
+            editProfileBackdropMouseDown = false;
           });
 
           const editProfilePhotoInput = document.getElementById('editProfilePhoto');
@@ -1462,7 +1490,7 @@ function generatePatientHTML(patientData = null, appointmentsData = [], reportsD
               
               if (response.ok) {
                 showToast('Success', 'Profile updated successfully!', 'success');
-                editProfileModal.classList.add('hidden');
+                closeEditProfile();
                 setTimeout(() => window.location.reload(), 1500);
               } else {
                 showToast('Error', 'Failed to update profile', 'error');
